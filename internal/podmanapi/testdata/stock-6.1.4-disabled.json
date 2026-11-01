@@ -1,0 +1,17 @@
+{
+  "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "State": {
+    "Running": true,
+    "StartedAt": "2026-11-01T00:00:00Z"
+  },
+  "Config": {
+    "Healthcheck": {
+      "Test": [
+        "CMD-SHELL",
+        "true"
+      ],
+      "Timeout": 30000000000,
+      "Retries": 3
+    }
+  }
+}

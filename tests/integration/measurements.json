@@ -1,0 +1,210 @@
+{
+  "engine": "podman version 6.1.4",
+  "compose_seconds": 1.2376358949986752,
+  "measurements": {
+    "no containers": {
+      "seconds": 3.012666877999436,
+      "cpu_seconds": 0.01,
+      "processes": [
+        {
+          "name": "runsv",
+          "rss_kib": 1436,
+          "pss_kib": 98,
+          "cpu_ticks": 0,
+          "fds": 9
+        },
+        {
+          "name": "podman-healthch",
+          "rss_kib": 7504,
+          "pss_kib": 7496,
+          "cpu_ticks": 0,
+          "fds": 8
+        },
+        {
+          "name": "runsv",
+          "rss_kib": 1496,
+          "pss_kib": 98,
+          "cpu_ticks": 0,
+          "fds": 9
+        },
+        {
+          "name": "podman",
+          "rss_kib": 48060,
+          "pss_kib": 26019,
+          "cpu_ticks": 6,
+          "fds": 9
+        },
+        {
+          "name": "exe",
+          "rss_kib": 55048,
+          "pss_kib": 33244,
+          "cpu_ticks": 12,
+          "fds": 12
+        }
+      ]
+    },
+    "one container without checks": {
+      "seconds": 3.0050854080036515,
+      "cpu_seconds": 0.02,
+      "processes": [
+        {
+          "name": "runsv",
+          "rss_kib": 1436,
+          "pss_kib": 98,
+          "cpu_ticks": 0,
+          "fds": 9
+        },
+        {
+          "name": "podman-healthch",
+          "rss_kib": 7548,
+          "pss_kib": 7540,
+          "cpu_ticks": 0,
+          "fds": 8
+        },
+        {
+          "name": "runsv",
+          "rss_kib": 1496,
+          "pss_kib": 98,
+          "cpu_ticks": 0,
+          "fds": 9
+        },
+        {
+          "name": "podman",
+          "rss_kib": 48060,
+          "pss_kib": 25987,
+          "cpu_ticks": 6,
+          "fds": 9
+        },
+        {
+          "name": "exe",
+          "rss_kib": 57008,
+          "pss_kib": 35172,
+          "cpu_ticks": 14,
+          "fds": 12
+        }
+      ]
+    },
+    "three checks with 30s intervals": {
+      "seconds": 3.005483371001901,
+      "cpu_seconds": 0.01,
+      "processes": [
+        {
+          "name": "runsv",
+          "rss_kib": 1436,
+          "pss_kib": 98,
+          "cpu_ticks": 0,
+          "fds": 9
+        },
+        {
+          "name": "podman-healthch",
+          "rss_kib": 7744,
+          "pss_kib": 7736,
+          "cpu_ticks": 0,
+          "fds": 8
+        },
+        {
+          "name": "runsv",
+          "rss_kib": 1496,
+          "pss_kib": 98,
+          "cpu_ticks": 0,
+          "fds": 9
+        },
+        {
+          "name": "podman",
+          "rss_kib": 48060,
+          "pss_kib": 25923,
+          "cpu_ticks": 6,
+          "fds": 9
+        },
+        {
+          "name": "exe",
+          "rss_kib": 58380,
+          "pss_kib": 36480,
+          "cpu_ticks": 16,
+          "fds": 12
+        }
+      ]
+    },
+    "seven short interval checks including slow failing probes": {
+      "seconds": 3.0271445630060043,
+      "cpu_seconds": 0.15,
+      "processes": [
+        {
+          "name": "runsv",
+          "rss_kib": 1436,
+          "pss_kib": 98,
+          "cpu_ticks": 0,
+          "fds": 9
+        },
+        {
+          "name": "podman-healthch",
+          "rss_kib": 9320,
+          "pss_kib": 9312,
+          "cpu_ticks": 4,
+          "fds": 11
+        },
+        {
+          "name": "runsv",
+          "rss_kib": 1496,
+          "pss_kib": 98,
+          "cpu_ticks": 0,
+          "fds": 9
+        },
+        {
+          "name": "podman",
+          "rss_kib": 48060,
+          "pss_kib": 25920,
+          "cpu_ticks": 6,
+          "fds": 9
+        },
+        {
+          "name": "exe",
+          "rss_kib": 63564,
+          "pss_kib": 41661,
+          "cpu_ticks": 44,
+          "fds": 19
+        }
+      ]
+    },
+    "after repeated scheduler restarts": {
+      "seconds": 3.0046400660066865,
+      "cpu_seconds": 0.1,
+      "processes": [
+        {
+          "name": "podman-healthch",
+          "rss_kib": 8480,
+          "pss_kib": 8472,
+          "cpu_ticks": 2,
+          "fds": 9
+        },
+        {
+          "name": "runsv",
+          "rss_kib": 1448,
+          "pss_kib": 103,
+          "cpu_ticks": 0,
+          "fds": 9
+        },
+        {
+          "name": "podman",
+          "rss_kib": 62504,
+          "pss_kib": 55367,
+          "cpu_ticks": 52,
+          "fds": 17
+        },
+        {
+          "name": "runsv",
+          "rss_kib": 1388,
+          "pss_kib": 97,
+          "cpu_ticks": 0,
+          "fds": 9
+        }
+      ]
+    }
+  },
+  "last_generation_requests": {
+    "Metadata": 19,
+    "Health": 32,
+    "Streams": 1
+  },
+  "max_scheduling_delay_ns": 98707554
+}

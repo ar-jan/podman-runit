@@ -1,0 +1,22 @@
+# Local-source template; generate concrete paths and checksums with make archive.
+# No published upstream repository or release is implied.
+pkgname=podman-runit
+version=0.1.0
+revision=1
+build_style=go
+go_import_path="podman-runit"
+go_package="./cmd/podman-healthcheckd ./cmd/podman-runit"
+go_mod_mode=vendor
+depends="podman>=6.1.4 runit turnstile"
+conflicts="podman-runit-healthcheck>=0"
+short_desc="Rootless Podman health scheduling with runit user services"
+maintainer="Orphaned <orphan@voidlinux.org>"
+license="MIT"
+# Local development checkout, not a public upstream URL.
+homepage="file:///home/arjan/Projects/ContainerTools/podman-runit"
+distfiles="file://@SOURCE_ARCHIVE@"
+checksum="@SHA256@"
+
+post_install() {
+	make install-assets DESTDIR="${DESTDIR}" PREFIX=/usr
+}

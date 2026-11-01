@@ -1,0 +1,10 @@
+{
+  "Test": [
+    "CMD",
+    "true"
+  ],
+  "StartPeriod": 60000000000,
+  "Interval": 1000000000,
+  "Timeout": 1000000000,
+  "Retries": 3
+}
