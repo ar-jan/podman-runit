@@ -117,7 +117,7 @@ needs an upstream location and maintainer metadata. The source package conflicts
 with the old custom build, does not provide Podman and has no replacement or
 migration hooks.
 
-Only native API 6.1.4 is accepted. Podman startup probes are intentionally
+Native API 6.1.4 or a later 6.x is accepted; only 6.1.4 was validated live. Podman startup probes are intentionally
 unsupported. Compose start_interval is an observed engine limitation. Crash or
 connection-loss exactly-once execution is impossible with this API; the durable
 hold and refresh policy prevents immediate retries but cannot prove server-side

@@ -12,11 +12,14 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 )
 
+// NativeVersion is the validated native API schema. Requests use it in their
+// route, which later Podman releases of the same major version still serve.
 const NativeVersion = "6.1.4"
 const maxResponse = 16 << 20
 
@@ -167,12 +170,45 @@ func (c *Client) Version(ctx context.Context) (Version, error) {
 			}
 		}
 	}
-	// This first release deliberately gates unvalidated native schemas. Docker's
-	// top-level ApiVersion is never a candidate for native negotiation.
-	if v.Native != NativeVersion {
-		return v, fmt.Errorf("native API %q unsupported; validated API is %s", v.Native, NativeVersion)
+	// The native API is semantically versioned, so later 6.x releases keep the
+	// validated schema; another major version stays gated until validated.
+	// Docker's top-level ApiVersion is never a candidate for native negotiation.
+	if !supportedNative(v.Native) {
+		return v, fmt.Errorf("native API %q unsupported; requires %s or a later release of the same major version", v.Native, NativeVersion)
 	}
 	return v, nil
+}
+
+// supportedNative accepts NativeVersion and later releases with the same major
+// version. Pre-release and build suffixes are ignored.
+func supportedNative(version string) bool {
+	got, ok := parseVersion(version)
+	want, _ := parseVersion(NativeVersion)
+	if !ok || got[0] != want[0] {
+		return false
+	}
+	return got[1] > want[1] || got[1] == want[1] && got[2] >= want[2]
+}
+func parseVersion(version string) ([3]int, bool) {
+	var out [3]int
+	if i := strings.IndexAny(version, "-+"); i >= 0 {
+		version = version[:i]
+	}
+	parts := strings.Split(version, ".")
+	if len(parts) != 3 {
+		return out, false
+	}
+	for i, p := range parts {
+		if p == "" || strings.Trim(p, "0123456789") != "" {
+			return out, false
+		}
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return out, false
+		}
+		out[i] = n
+	}
+	return out, true
 }
 func route(path string) string { return "/v" + NativeVersion + "/libpod/" + path }
 func (c *Client) Info(ctx context.Context) (Info, error) {

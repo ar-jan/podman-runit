@@ -7,7 +7,7 @@ build_style=go
 go_import_path="podman-runit"
 go_package="./cmd/podman-healthcheckd ./cmd/podman-runit"
 go_mod_mode=vendor
-depends="podman>=6.1.4 runit turnstile"
+depends="podman>=6.1.4<7.0 runit turnstile"
 conflicts="podman-runit-healthcheck>=0"
 short_desc="Rootless Podman health scheduling with runit user services"
 maintainer="Orphaned <orphan@voidlinux.org>"

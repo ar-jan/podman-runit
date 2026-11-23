@@ -30,7 +30,7 @@ make install DESTDIR="$PWD/build/stage"
 cd build
 xbps-create -A x86_64 -n podman-runit-0.1.0_1 \
   -s 'Rootless Podman health scheduling with runit user services' \
-  -l MIT -D 'podman>=6.1.0 runit turnstile' stage
+  -l MIT -D 'podman>=6.1.4<7.0 runit turnstile' stage
 ```
 
 ## Notes for public releases

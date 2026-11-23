@@ -4,7 +4,7 @@
 
 | Feature | Policy |
 | --- | --- |
-| Rootless Podman 6.1+ native API | Supported; native API version is checked explicitly |
+| Rootless Podman 6.x native API, 6.1.4 or later | Supported; other major versions are refused until validated |
 | Image / CLI / Docker Compose health checks | Automatic, including `CMD` and `CMD-SHELL` |
 | `start_period` | Probes run promptly; Podman applies failure grace |
 | Compose `start_interval` | Discarded by Podman compatibility creation; not reproduced |

@@ -10,7 +10,7 @@ only schedules when to invoke them over Podman's Unix API socket.
 
 ## Requirements
 
-- Void Linux with rootless `podman` (6.1+), `runit`, and `turnstile`
+- Void Linux with rootless `podman` (6.1.4 or a later 6.x), `runit`, and `turnstile`
 - An enabled Podman event backend (`events_logger = "file"` or `"journald"` in
   `containers.conf`)
 - Optional: Docker Compose (used through `podman compose`)
@@ -95,7 +95,7 @@ make check
 ```
 
 To run the end-to-end integration suite against an isolated disposable store
-(requires rootless containers, `curl`, `runit`, Podman 6.1+, and Docker
+(requires rootless containers, `curl`, `runit`, Podman 6.1.4 or a later 6.x, and Docker
 Compose):
 
 ```sh

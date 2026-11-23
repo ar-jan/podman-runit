@@ -37,6 +37,14 @@ func TestNativeVersion(t *testing.T) {
 	}{
 		{`{"ApiVersion":"1.44","Components":[{"Name":"Podman Engine","Details":{"APIVersion":"6.1.4"}}]}`, "", true},
 		{`{"ApiVersion":"1.44"}`, "6.1.4", true},
+		{`{"ApiVersion":"1.44"}`, "6.1.5", true},
+		{`{"ApiVersion":"1.44"}`, "6.2.0", true},
+		{`{"ApiVersion":"1.44"}`, "6.10.0-dev", true},
+		{`{"ApiVersion":"1.44"}`, "6.1.3", false},
+		{`{"ApiVersion":"1.44"}`, "6.0.9", false},
+		{`{"ApiVersion":"1.44"}`, "5.9.9", false},
+		{`{"ApiVersion":"1.44"}`, "6.2", false},
+		{`{"ApiVersion":"1.44"}`, "6.x.0", false},
 		{`{"ApiVersion":"6.1.4"}`, "", false},
 		{`{}`, "7.0.0", false},
 	} {
@@ -46,7 +54,7 @@ func TestNativeVersion(t *testing.T) {
 		})
 		_, err := c.Version(context.Background())
 		if (err == nil) != tc.ok {
-			t.Fatal(err)
+			t.Fatalf("header %q: %v", tc.header, err)
 		}
 	}
 }
