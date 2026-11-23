@@ -89,6 +89,28 @@ func TestResponseContracts(t *testing.T) {
 			t.Fatal("race classification")
 		}
 	}
+	// Bodies as returned by stock Podman 6.1.4 for a timed-out probe and for an
+	// internal failure that leaves the execution uncertain.
+	for _, tc := range []struct {
+		message string
+		ok      bool
+	}{
+		{"healthcheck command exceeded timeout of 1s", true},
+		{"unable to update health check log /x for y: disk full", false},
+		{"", false},
+	} {
+		c := server(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(500)
+			json.NewEncoder(w).Encode(map[string]any{"cause": tc.message, "message": tc.message, "response": 500})
+		})
+		err := c.Health(context.Background(), strings.Repeat("a", 64))
+		if (err == nil) != tc.ok {
+			t.Fatalf("%q: %v", tc.message, err)
+		}
+		if !tc.ok && tc.message != "" && !strings.Contains(err.Error(), tc.message) {
+			t.Fatalf("error message dropped: %v", err)
+		}
+	}
 	var h HealthConfig
 	if err := json.Unmarshal([]byte(`{"Interval":9007199254740993,"Timeout":1}`), &h); err != nil {
 		t.Fatal(err)

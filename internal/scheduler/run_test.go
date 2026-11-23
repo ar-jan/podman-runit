@@ -152,3 +152,71 @@ func TestPartialSnapshotRejected(t *testing.T) {
 		t.Fatal("partial snapshot accepted")
 	}
 }
+func TestTimedOutProbeKeepsInterval(t *testing.T) {
+	// Podman 6 reports a probe timeout as HTTP 500 after recording the failure.
+	dir, err := os.MkdirTemp("", "pr-timeout-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	socket := filepath.Join(dir, "api")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var probes, lists atomic.Int32
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/version":
+			w.Header().Set("Libpod-API-Version", "6.1.4")
+			fmt.Fprint(w, `{}`)
+		case strings.HasSuffix(r.URL.Path, "/info"):
+			fmt.Fprint(w, `{"host":{"eventLogger":"file","security":{"rootless":true}}}`)
+		case strings.HasSuffix(r.URL.Path, "/events"):
+			w.WriteHeader(200)
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+		case strings.HasSuffix(r.URL.Path, "/containers/json"):
+			lists.Add(1)
+			fmt.Fprintf(w, `[{"Id":"%s"}]`, fixture(1).ID)
+		case strings.HasSuffix(r.URL.Path, "/healthcheck"):
+			probes.Add(1)
+			w.WriteHeader(500)
+			fmt.Fprint(w, `{"cause":"healthcheck command exceeded timeout of 1s","message":"healthcheck command exceeded timeout of 1s","response":500}`)
+		default:
+			json.NewEncoder(w).Encode(fixture(1))
+		}
+	})}
+	go server.Serve(listener)
+	defer server.Close()
+	c := podmanapi.New(socket)
+	defer c.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	finished := make(chan error, 1)
+	go func() {
+		finished <- Run(ctx, c, Options{Socket: socket, Runtime: dir, Workers: 1, Reconcile: time.Minute, Drain: 20 * time.Millisecond})
+	}()
+	deadline := time.After(5 * time.Second)
+	for probes.Load() < 3 {
+		select {
+		case <-deadline:
+			t.Fatalf("timed-out probe not repeated at its interval: %d probes", probes.Load())
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	s, err := ReadStatus(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.State != "ready" {
+		t.Fatalf("probe timeout changed scheduler state to %q: %s", s.State, s.Detail)
+	}
+	if lists.Load() != 1 {
+		t.Fatalf("probe timeout forced %d extra reconciles", lists.Load()-1)
+	}
+	cancel()
+	if err := <-finished; err != nil {
+		t.Fatal(err)
+	}
+}

@@ -71,7 +71,7 @@ active.
 ## Recovery journal and timeouts
 
 Before dispatching a probe, a private runtime journal records an uncertainty
-hold of `2 × (probe timeout + 30s) + interval`. Successful responses clear the
+hold of `2 × (probe timeout + 30s) + interval`. Completed probes clear the
 hold; transport or API errors trigger reconciliation and defer another attempt
 by at least one request budget. The journal survives a daemon crash, and a
 fresh inspect is performed before retry—HTTP success never substitutes for
@@ -79,6 +79,10 @@ Podman's cumulative health state. Recovery holds stay conservative even if a
 new health-log entry is already visible.
 
 - An omitted timeout defaults to `30s`.
+- A probe that exceeds its timeout counts as a completed, failed check. Podman
+  records it and answers HTTP 500, and the next probe follows the normal
+  interval, as with Podman's own timer. Podman 6.1.4 leaves the timed-out
+  command running inside the container.
 - A zero/unlimited timeout uses a 5-minute client budget plus 30 s overhead (a
   server-side unlimited command may outlive that budget).
 - Timeouts over 24 hours are visibly excluded.

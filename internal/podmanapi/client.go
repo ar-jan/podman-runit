@@ -83,9 +83,17 @@ func Lifecycle(e Event) bool {
 	return false
 }
 
-type HTTPError struct{ Code int }
+type HTTPError struct {
+	Code    int
+	Message string
+}
 
-func (e *HTTPError) Error() string { return fmt.Sprintf("Podman HTTP %d", e.Code) }
+func (e *HTTPError) Error() string {
+	if e.Message == "" {
+		return fmt.Sprintf("Podman HTTP %d", e.Code)
+	}
+	return fmt.Sprintf("Podman HTTP %d: %s", e.Code, e.Message)
+}
 func IsRace(err error) bool {
 	var e *HTTPError
 	return errors.As(err, &e) && (e.Code == 404 || e.Code == 409)
@@ -128,8 +136,12 @@ func request(ctx context.Context, c *http.Client, path string) (*http.Response, 
 		return nil, err
 	}
 	if res.StatusCode != 200 {
-		res.Body.Close()
-		return nil, &HTTPError{res.StatusCode}
+		defer res.Body.Close()
+		var model struct {
+			Message string `json:"message"`
+		}
+		_ = json.NewDecoder(io.LimitReader(res.Body, 64<<10)).Decode(&model)
+		return nil, &HTTPError{res.StatusCode, model.Message}
 	}
 	return res, nil
 }
@@ -255,12 +267,25 @@ func (c *Client) Inspect(ctx context.Context, id string) (Container, error) {
 	}
 	return v, err
 }
+
+// probeTimeout prefixes Podman's define.ErrHealthCheckTimeout message.
+const probeTimeout = "healthcheck command exceeded timeout"
+
+// Health returns nil once Podman has run and recorded a probe, whether it
+// passed, failed or timed out. An error leaves the execution uncertain.
 func (c *Client) Health(ctx context.Context, id string) error {
 	if !ValidID(id) {
 		return errors.New("invalid full container ID")
 	}
 	c.healthCount.Add(1)
 	res, err := request(ctx, c.execution, route("containers/"+id+"/healthcheck"))
+	// Podman 6 answers a timed-out probe with HTTP 500 after logging it as a
+	// failed check, so the next probe follows the interval as with Podman's own
+	// timer. Podman leaves the timed-out command running in the container.
+	var httpErr *HTTPError
+	if errors.As(err, &httpErr) && httpErr.Code == 500 && strings.HasPrefix(httpErr.Message, probeTimeout) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
