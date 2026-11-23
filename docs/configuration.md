@@ -15,7 +15,9 @@ Colon-separated search paths are rejected.
 and `podman-healthcheckd`) with individual script symlinks into
 `/usr/share/podman-runit/services`. New definitions are staged with `down`
 before activation. Repeated `enable`/`disable` runs preserve local `conf`,
-logs, and supervision data. `--dry-run` reports planned actions without
+logs, and supervision data. Disabling a service stops its packaged logger
+after the service and marks both down for the next login. Enabling starts the
+logger first. A logger retained during adoption stays under its owner's control. `--dry-run` reports planned actions without
 modifying files or controlling services.
 
 ### Existing API services

@@ -218,3 +218,57 @@ func TestAdoptionKeepsManualServiceOnFailure(t *testing.T) {
 		})
 	}
 }
+
+func TestLoggerEnablement(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		o := opts(t)
+		if err := Enable(o); err != nil {
+			t.Fatal(err)
+		}
+		dest := filepath.Join(o.Dir, Names[0])
+		logger := filepath.Join(dest, "log")
+		if legacy {
+			if err := os.WriteFile(filepath.Join(dest, Marker), []byte(legacyOwnership), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(filepath.Join(logger, Marker)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := Disable(o); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(filepath.Join(logger, "down")); err != nil {
+			t.Fatal("logger not persistently down", err)
+		}
+		if err := Enable(o); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(filepath.Join(logger, "down")); !os.IsNotExist(err) {
+			t.Fatal("logger still disabled", err)
+		}
+	}
+}
+
+func TestAdoptedLoggerKeepsOwnState(t *testing.T) {
+	o := opts(t)
+	o.AdoptAPI = true
+	dest := filepath.Join(o.Dir, Names[0])
+	logger := filepath.Join(dest, "log")
+	if err := os.MkdirAll(logger, 0700); err != nil {
+		t.Fatal(err)
+	}
+	// A manual service may have chosen even the packaged log script.
+	if err := os.Symlink(filepath.Join(o.Assets, Names[0], "log/run"), filepath.Join(logger, "run")); err != nil {
+		t.Fatal(err)
+	}
+	if err := Enable(o); err != nil {
+		t.Fatal(err)
+	}
+	if err := Disable(o); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(logger, "down")); !os.IsNotExist(err) {
+		t.Fatal("manual logger was disabled", err)
+	}
+}

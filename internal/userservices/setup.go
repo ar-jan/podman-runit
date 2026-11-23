@@ -8,12 +8,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
 )
 
 const Marker = ".podman-runit-owned"
+const ownership = "podman-runit-v2\n"
+const legacyOwnership = "podman-runit-v1\n"
 
 var Names = []string{"podman-api", "podman-healthcheckd"}
 
@@ -37,7 +40,29 @@ func Directory(explicit string) (string, error) {
 }
 func Owned(path string) bool {
 	b, err := os.ReadFile(filepath.Join(path, Marker))
-	return err == nil && string(b) == "podman-runit-v1\n"
+	return err == nil && (string(b) == ownership || string(b) == legacyOwnership)
+}
+
+// Keep adopted loggers independent. Older installations marked only the parent
+// and installed log/run as a symlink into the same asset directory as run.
+func serviceParts(dest string) []string {
+	parts := []string{dest}
+	logDir := filepath.Join(dest, "log")
+	if info, err := os.Lstat(logDir); err != nil || !info.IsDir() {
+		return parts
+	}
+	if Owned(logDir) {
+		return append(parts, logDir)
+	}
+	marker, _ := os.ReadFile(filepath.Join(dest, Marker))
+	if string(marker) == legacyOwnership {
+		main, err := os.Readlink(filepath.Join(dest, "run"))
+		logger, logErr := os.Readlink(filepath.Join(logDir, "run"))
+		if err == nil && logErr == nil && logger == filepath.Join(filepath.Dir(main), "log/run") {
+			return append(parts, logDir)
+		}
+	}
+	return parts
 }
 
 // runsv leaves its FIFOs behind on exit. Like sv, probe the ok FIFO for a
@@ -201,10 +226,15 @@ func enableService(o Options, name string) error {
 }
 
 func activate(dest string) error {
-	if err := os.Remove(filepath.Join(dest, "down")); err != nil && !os.IsNotExist(err) {
-		return err
+	for _, dir := range slices.Backward(serviceParts(dest)) {
+		if err := os.Remove(filepath.Join(dir, "down")); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		if err := control(dir, "up"); err != nil {
+			return err
+		}
 	}
-	return control(dest, "up")
+	return nil
 }
 
 func install(dest, name, assets string) error {
@@ -222,7 +252,10 @@ func install(dest, name, assets string) error {
 	if err := os.WriteFile(filepath.Join(dest, "conf"), []byte("# Trusted POSIX shell assignments; shared socket belongs in common.conf.\n"), 0600); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dest, Marker), []byte("podman-runit-v1\n"), 0600)
+	if err := os.WriteFile(filepath.Join(dest, "log", Marker), []byte(ownership), 0600); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dest, Marker), []byte(ownership), 0600)
 }
 func Disable(o Options) error {
 	if !o.DryRun {
@@ -247,12 +280,18 @@ func Disable(o Options) error {
 		}
 		fmt.Fprintf(o.Out, "disable %s (preserve files and logs)\n", dest)
 		if !o.DryRun {
-			if err := os.WriteFile(filepath.Join(dest, "down"), nil, 0600); err != nil {
-				errs = append(errs, err)
-				continue
+			parts := serviceParts(dest)
+			for _, dir := range parts {
+				if err := os.WriteFile(filepath.Join(dir, "down"), nil, 0600); err != nil {
+					errs = append(errs, err)
+				}
 			}
-			if err := control(dest, "down"); err != nil {
-				errs = append(errs, err)
+			// Drain the service before stopping its log reader.
+			for _, dir := range parts {
+				if err := control(dir, "down"); err != nil {
+					errs = append(errs, err)
+					break
+				}
 			}
 		}
 	}
