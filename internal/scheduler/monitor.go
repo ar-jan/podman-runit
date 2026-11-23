@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"math/rand/v2"
+	"slices"
 	"time"
 
 	"podman-runit/internal/podmanapi"
@@ -40,16 +42,26 @@ func inspect(ctx context.Context, c *podmanapi.Client, id string, u *Update) err
 	}
 	return nil
 }
-func snapshot(ctx context.Context, c *podmanapi.Client) (Update, error) {
+func snapshot(ctx context.Context, c *podmanapi.Client, known map[string]bool) (Update, error) {
 	ids, err := c.List(ctx)
-	if err != nil {
+	u := Update{Full: true, State: "ready"}
+	if errors.Is(err, podmanapi.ErrListTimeout) {
+		ids = slices.Sorted(maps.Keys(known))
+		u.Full = false
+		u.Detail = "container listing timed out; inspecting known containers until discovery recovers"
+	} else if err != nil {
 		return Update{}, err
 	}
-	u := Update{Full: true, State: "ready"}
 	for _, id := range ids {
 		if err := inspect(ctx, c, id, &u); err != nil {
 			return Update{}, err
 		}
+	}
+	if !u.Full && len(u.Containers) == 0 {
+		// Keep the subscription open. A lifecycle event may identify a
+		// container we can inspect before the next successful listing.
+		u.State = "waiting"
+		return u, nil
 	}
 	// One broken container is excluded, but when every container fails the
 	// engine is the likelier fault: report it rather than claim readiness.
@@ -73,10 +85,11 @@ func send(ctx context.Context, out chan<- Update, u Update) bool {
 
 // Monitor owns API synchronization, independently of the execution workers.
 func Monitor(ctx context.Context, c *podmanapi.Client, out chan<- Update, refresh <-chan struct{}, reconcile time.Duration) {
+	known := make(map[string]bool)
 	backoff := 250 * time.Millisecond
 	for ctx.Err() == nil {
 		began := time.Now()
-		err := session(ctx, c, out, refresh, reconcile)
+		err := session(ctx, c, out, refresh, reconcile, known)
 		if ctx.Err() != nil {
 			return
 		}
@@ -94,7 +107,7 @@ func Monitor(ctx context.Context, c *podmanapi.Client, out chan<- Update, refres
 		backoff = min(backoff*2, 30*time.Second)
 	}
 }
-func session(parent context.Context, c *podmanapi.Client, out chan<- Update, refresh <-chan struct{}, reconcile time.Duration) error {
+func session(parent context.Context, c *podmanapi.Client, out chan<- Update, refresh <-chan struct{}, reconcile time.Duration, known map[string]bool) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	if _, err := c.Version(ctx); err != nil {
@@ -128,10 +141,27 @@ func session(parent context.Context, c *podmanapi.Client, out chan<- Update, ref
 	}()
 	defer func() { cancel(); body.Close(); <-ended }()
 	send(ctx, out, Update{State: "synchronizing"})
+	publish := func(u Update) {
+		if u.Full {
+			clear(known)
+		}
+		for _, v := range u.Containers {
+			known[v.ID] = true
+		}
+		for id := range u.Failed {
+			known[id] = true
+		}
+		for _, id := range u.Removed {
+			delete(known, id)
+		}
+		send(ctx, out, u)
+	}
+	var discoveryDetail string
 	full := func() error {
-		u, err := snapshot(ctx, c)
+		u, err := snapshot(ctx, c, known)
 		if err == nil {
-			send(ctx, out, u)
+			discoveryDetail = u.Detail
+			publish(u)
 		}
 		return err
 	}
@@ -169,6 +199,7 @@ func session(parent context.Context, c *podmanapi.Client, out chan<- Update, ref
 				debounce.Reset(50 * time.Millisecond)
 			}
 			pending[e.Actor.ID] = true
+			known[e.Actor.ID] = true
 			if len(pending) >= 256 {
 				if err := full(); err != nil {
 					return err
@@ -176,14 +207,17 @@ func session(parent context.Context, c *podmanapi.Client, out chan<- Update, ref
 				clear(pending)
 			}
 		case <-debounce.C:
-			u := Update{State: "ready"}
+			u := Update{Detail: discoveryDetail}
 			for id := range pending {
 				if err := inspect(ctx, c, id, &u); err != nil {
 					return err
 				}
 			}
 			clear(pending)
-			send(ctx, out, u)
+			if len(u.Containers) > 0 || discoveryDetail == "" {
+				u.State = "ready"
+			}
+			publish(u)
 		}
 	}
 }

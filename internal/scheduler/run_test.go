@@ -148,12 +148,12 @@ func TestPartialSnapshotRejected(t *testing.T) {
 	defer s.Close()
 	c := podmanapi.New(socket)
 	defer c.Close()
-	u, err := snapshot(context.Background(), c)
+	u, err := snapshot(context.Background(), c, nil)
 	if err == nil || u.Full {
 		t.Fatal("partial snapshot accepted")
 	}
 	listFails.Store(true)
-	if u, err := snapshot(context.Background(), c); err == nil || u.Full {
+	if u, err := snapshot(context.Background(), c, nil); err == nil || u.Full {
 		t.Fatal("failed listing returned an authoritative snapshot")
 	}
 }

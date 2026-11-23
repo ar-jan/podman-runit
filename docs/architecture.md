@@ -37,7 +37,12 @@ Metadata/event streaming and probes use separate connections:
 - **Subscription and snapshots:** The event stream flushes response headers
   before the initial snapshot is taken, with a 2-second timestamp overlap. A
   bounded 256-event buffer triggers full reconciliation on overflow. Failed
-  snapshots never erase known containers.
+  snapshots never erase known containers. Podman also takes container locks
+  while listing. If the list times out and `/_ping` succeeds, the scheduler
+  keeps the event stream open and inspects known IDs individually. Status
+  reports the incomplete discovery until a full list succeeds. Containers
+  missing from the cache can still be discovered through lifecycle events.
+  Initial engine version and capability checks must succeed before dispatch.
 - **Uninspectable containers:** When Podman answers an inspect with an error
   or an unusable description for one container, only that container is
   excluded (`inspect failed: …` in `status`, logged once per change) and keeps
@@ -51,7 +56,7 @@ Metadata/event streaming and probes use separate connections:
   are engine failures. `doctor` lists every container it cannot inspect and
   exits non-zero.
 - **Reconnects:** Exponential backoff (250 ms–30 s with jitter), followed by a
-  full snapshot before dispatch resumes.
+  fresh inspection before dispatch resumes.
 - **Reconciliation:** Periodic full reconciliation runs every 60 seconds by
   default and refreshes all container configurations.
 - **Limits and transport:** Idle event streams have no read deadline. Metadata
