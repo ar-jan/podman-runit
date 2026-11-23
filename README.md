@@ -99,7 +99,7 @@ To run the end-to-end integration suite against an isolated disposable store
 Compose):
 
 ```sh
-python3 tests/integration/run.py --podman /path/to/podman --keep
+python3 tests/integration/run.py --podman /usr/bin/podman --keep
 ```
 
 Unit tests simulate scheduler clock advancement without sleeps and use Unix
