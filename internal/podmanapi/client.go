@@ -285,11 +285,17 @@ func (c *Client) Inspect(ctx context.Context, id string) (Container, error) {
 	}
 	err := c.get(ctx, route("containers/"+id+"/json"), &v)
 	var httpErr *HTTPError
+	var netErr net.Error
 	switch {
 	case IsRace(err):
 		return v, err
 	case errors.As(err, &httpErr) || errors.Is(err, errUnusable):
 		return v, &ContainerError{id, err}
+	// Inspect waits for the container's lock, which a stuck operation on that
+	// container can hold indefinitely. If Podman still answers a lock-free
+	// request, the timeout belongs to this container, not the engine.
+	case errors.As(err, &netErr) && netErr.Timeout() && ctx.Err() == nil && c.responsive(ctx):
+		return v, &ContainerError{id, fmt.Errorf("inspect timed out after %s while Podman stayed responsive", c.metadata.Timeout)}
 	case err != nil:
 		return v, err
 	case v.State.Running && v.State.StartedAt.IsZero():
@@ -298,6 +304,20 @@ func (c *Client) Inspect(ctx context.Context, id string) (Container, error) {
 		return v, &ContainerError{id, errors.New("inspect ID mismatch")}
 	}
 	return v, nil
+}
+
+// responsive reports whether Podman promptly answers /_ping, which takes no
+// container lock.
+func (c *Client) responsive(ctx context.Context) bool {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	c.metadataCount.Add(1)
+	res, err := request(ctx, c.metadata, "/_ping")
+	if err != nil {
+		return false
+	}
+	res.Body.Close()
+	return true
 }
 
 // probeTimeout prefixes Podman's define.ErrHealthCheckTimeout message.

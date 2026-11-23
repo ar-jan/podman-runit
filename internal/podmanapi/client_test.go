@@ -211,3 +211,37 @@ func TestInspectFailureScope(t *testing.T) {
 		}
 	}
 }
+
+func TestInspectTimeoutScope(t *testing.T) {
+	stuck, fine := strings.Repeat("e", 64), strings.Repeat("f", 64)
+	var pingHangs atomic.Bool
+	c := server(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/_ping" && !pingHangs.Load():
+			w.Write([]byte("OK"))
+		case strings.Contains(r.URL.Path, fine):
+			w.Write([]byte(`{"Id":"` + fine + `"}`))
+		default: // a container lock held by a stuck operation, or a hung engine
+			<-r.Context().Done()
+		}
+	})
+	c.metadata.Timeout = 200 * time.Millisecond
+	_, err := c.Inspect(context.Background(), stuck)
+	var fault *ContainerError
+	if !errors.As(err, &fault) || !strings.Contains(err.Error(), "timed out after 200ms while Podman stayed responsive") {
+		t.Fatalf("stuck container with responsive engine: %v", err)
+	}
+	if _, err := c.Inspect(context.Background(), fine); err != nil {
+		t.Fatal(err)
+	}
+	pingHangs.Store(true)
+	if _, err := c.Inspect(context.Background(), stuck); err == nil || errors.As(err, &fault) {
+		t.Fatalf("hung engine reported as one container: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	pingHangs.Store(false)
+	if _, err := c.Inspect(ctx, stuck); err == nil || errors.As(err, &fault) {
+		t.Fatalf("cancelled request reported as one container: %v", err)
+	}
+}
