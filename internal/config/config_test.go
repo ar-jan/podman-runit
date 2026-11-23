@@ -112,3 +112,37 @@ func TestDescends(t *testing.T) {
 		}
 	}
 }
+func TestImportCommonRemovesVariables(t *testing.T) {
+	if _, err := exec.LookPath("chpst"); err != nil {
+		t.Skip("runit needed for envdir import")
+	}
+	dir := t.TempDir()
+	envdir := filepath.Join(dir, "env")
+	os.Mkdir(envdir, 0700)
+	os.WriteFile(filepath.Join(envdir, "PR_TEST_CLEARED"), nil, 0600) // empty: chpst -e removes it
+	os.WriteFile(filepath.Join(envdir, "PR_TEST_ENVDIR"), []byte("envdir\n"), 0600)
+	conf := filepath.Join(dir, "config", "podman-runit")
+	os.MkdirAll(conf, 0700)
+	os.WriteFile(filepath.Join(conf, "common.conf"), []byte("unset PR_TEST_UNSET\nPR_TEST_CONF=conf\n"), 0600)
+	for key, value := range map[string]string{
+		"PODMAN_RUNIT_CONFIG_LOADED": "", "PODMAN_RUNIT_ENV_LOADED": "",
+		"TURNSTILE_ENV_DIR": envdir, "XDG_CONFIG_HOME": filepath.Join(dir, "config"),
+		"PR_TEST_CLEARED": "shell", "PR_TEST_UNSET": "shell", "PR_TEST_KEPT": "shell",
+		"PR_TEST_ENVDIR": "", "PR_TEST_CONF": "",
+	} {
+		t.Setenv(key, value)
+	}
+	if err := ImportCommon(); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]string{"PR_TEST_ENVDIR": "envdir", "PR_TEST_CONF": "conf", "PR_TEST_KEPT": "shell"} {
+		if got := os.Getenv(key); got != want {
+			t.Fatalf("%s = %q, want %q", key, got, want)
+		}
+	}
+	for _, key := range []string{"PR_TEST_CLEARED", "PR_TEST_UNSET"} {
+		if value, ok := os.LookupEnv(key); ok {
+			t.Fatalf("%s kept as %q although the launcher removes it", key, value)
+		}
+	}
+}

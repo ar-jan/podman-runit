@@ -16,17 +16,27 @@ func ImportCommon() error {
 	if os.Getenv("PODMAN_RUNIT_CONFIG_LOADED") == "1" {
 		return nil
 	}
+	// The command prints its complete environment, so a variable missing from
+	// it was removed (an empty envdir file, or unset in common.conf) and must
+	// be removed here too, as the launcher removes it for the services.
 	importEnv := func(cmd *exec.Cmd) error {
 		b, err := cmd.Output()
 		if err != nil {
 			return fmt.Errorf("cannot load trusted environment: %w", err)
 		}
+		kept := map[string]bool{}
 		for _, entry := range bytes.Split(b, []byte{0}) {
 			key, value, ok := strings.Cut(string(entry), "=")
 			if ok {
+				kept[key] = true
 				if err := os.Setenv(key, value); err != nil {
 					return err
 				}
+			}
+		}
+		for _, entry := range os.Environ() {
+			if key, _, _ := strings.Cut(entry, "="); !kept[key] {
+				os.Unsetenv(key)
 			}
 		}
 		return nil
