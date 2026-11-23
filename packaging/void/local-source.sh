@@ -7,7 +7,7 @@ archive="$PWD/dist/podman-runit-0.1.0.tar.gz"
 # Fixed metadata makes byte-identical archives from identical sources.
 tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
     --exclude=__pycache__ --transform='s,^,podman-runit-0.1.0/,' \
-    -cf - go.mod cmd internal services packaging tests Makefile README.md README.voidlinux.md LICENSE \
+    -cf - go.mod cmd internal services packaging tests docs Makefile README.md LICENSE \
     | gzip -n > "$archive"
 checksum=$(sha256sum "$archive" | cut -d ' ' -f 1)
 sed -e "s|@SOURCE_ARCHIVE@|$archive|g" -e "s|@SHA256@|$checksum|g" packaging/void/template > dist/template

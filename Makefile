@@ -25,7 +25,8 @@ install-assets:
 	cp -R services/. $(DESTDIR)$(PREFIX)/share/podman-runit/services/
 	install -Dm644 LICENSE $(DESTDIR)$(PREFIX)/share/licenses/podman-runit/LICENSE
 	install -Dm644 README.md $(DESTDIR)$(PREFIX)/share/doc/podman-runit/README.md
-	install -Dm644 README.voidlinux.md $(DESTDIR)$(PREFIX)/share/doc/podman-runit/README.voidlinux.md
+	install -d $(DESTDIR)$(PREFIX)/share/doc/podman-runit/docs
+	cp -R docs/. $(DESTDIR)$(PREFIX)/share/doc/podman-runit/docs/
 	install -Dm644 tests/integration/REPORT.md $(DESTDIR)$(PREFIX)/share/doc/podman-runit/tests/integration/REPORT.md
 
 archive:
