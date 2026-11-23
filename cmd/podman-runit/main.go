@@ -94,8 +94,9 @@ func run() error {
 		c := podmanapi.New(socket)
 		defer c.Close()
 		unsupervised := 0
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
+		// The client bounds each metadata request. A large store or several
+		// blocked inspections can legitimately take longer than one deadline.
+		ctx := context.Background()
 		if command == "doctor" {
 			self, _ := os.Executable()
 			fmt.Printf("podman-runit helper: %s (0.1.0)\n", self)
