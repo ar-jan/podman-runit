@@ -45,7 +45,7 @@ def process_ids():
         try:
             for thread in pathlib.Path(f'/proc/{pid}/task').iterdir():
                 for child in (thread/'children').read_text().split():visit(int(child))
-        except FileNotFoundError:pass
+        except (FileNotFoundError, ProcessLookupError):pass
     for proc in processes:
         if proc.poll() is None:visit(proc.runner.pid)
     return found
@@ -58,7 +58,7 @@ def metrics():
             smaps=pathlib.Path(f'/proc/{pid}/smaps_rollup').read_text()
             def field(text,name):return int(next(line.split()[1] for line in text.splitlines() if line.startswith(name+':')))
             rows[pid]={'name':status.splitlines()[0].split()[1], 'rss_kib':field(status,'VmRSS'),'pss_kib':field(smaps,'Pss'),'cpu_ticks':int(stat[11])+int(stat[12]),'fds':len(list(pathlib.Path(f'/proc/{pid}/fd').iterdir()))}
-        except (FileNotFoundError,StopIteration,PermissionError):pass
+        except (FileNotFoundError, ProcessLookupError, StopIteration, PermissionError):pass
     return rows
 def sample(name,seconds=3):
     before=metrics();start=time.monotonic();time.sleep(seconds);after=metrics()
