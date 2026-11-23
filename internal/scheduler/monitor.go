@@ -104,17 +104,13 @@ func session(parent context.Context, c *podmanapi.Client, out chan<- Update, ref
 	if err != nil {
 		return err
 	}
-	if !info.Host.Security.Rootless {
-		return fmt.Errorf("rootful engine unsupported")
-	}
-	if info.Host.EventLogger != "file" && info.Host.EventLogger != "journald" {
-		return fmt.Errorf("event backend %q unsupported: configure events_logger=file in containers.conf", info.Host.EventLogger)
+	if err := podmanapi.CheckEngine(info); err != nil {
+		return err
 	}
 	body, err := c.Events(ctx, time.Now().Add(-2*time.Second))
 	if err != nil {
 		return err
 	}
-	defer body.Close()
 	events := make(chan podmanapi.Event, 256)
 	overflow := make(chan struct{}, 1)
 	ended := make(chan error, 1)

@@ -245,3 +245,20 @@ func TestInspectTimeoutScope(t *testing.T) {
 		t.Fatalf("cancelled request reported as one container: %v", err)
 	}
 }
+func TestCheckEngine(t *testing.T) {
+	for _, tc := range []struct {
+		logger   string
+		rootless bool
+		problem  string
+	}{
+		{"file", true, ""}, {"journald", true, ""},
+		{"none", true, `event backend "none" unsupported`}, {"file", false, "rootful engine unsupported"},
+	} {
+		var i Info
+		i.Host.EventLogger, i.Host.Security.Rootless = tc.logger, tc.rootless
+		err := CheckEngine(i)
+		if (tc.problem == "") != (err == nil) || err != nil && !strings.Contains(err.Error(), tc.problem) {
+			t.Fatalf("%s rootless=%t: %v", tc.logger, tc.rootless, err)
+		}
+	}
+}

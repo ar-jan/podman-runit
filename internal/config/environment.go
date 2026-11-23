@@ -10,6 +10,15 @@ import (
 	"syscall"
 )
 
+// CommonFile is the shared configuration the service launcher sources.
+func CommonFile() string {
+	base := os.Getenv("XDG_CONFIG_HOME")
+	if base == "" {
+		base = filepath.Join(os.Getenv("HOME"), ".config")
+	}
+	return filepath.Join(base, "podman-runit/common.conf")
+}
+
 // ImportCommon is only used by the on-demand helper. Daemons receive their
 // environment from the service launcher, before deriving paths.
 func ImportCommon() error {
@@ -46,11 +55,7 @@ func ImportCommon() error {
 			return err
 		}
 	}
-	base := os.Getenv("XDG_CONFIG_HOME")
-	if base == "" {
-		base = filepath.Join(os.Getenv("HOME"), ".config")
-	}
-	file := filepath.Join(base, "podman-runit/common.conf")
+	file := CommonFile()
 	s, err := os.Stat(file)
 	if os.IsNotExist(err) {
 		return nil

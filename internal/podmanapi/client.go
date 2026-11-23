@@ -236,6 +236,17 @@ func parseVersion(version string) ([3]int, bool) {
 	return out, true
 }
 func route(path string) string { return "/v" + NativeVersion + "/libpod/" + path }
+
+// CheckEngine rejects engines the scheduler does not support.
+func CheckEngine(i Info) error {
+	if !i.Host.Security.Rootless {
+		return errors.New("rootful engine unsupported")
+	}
+	if i.Host.EventLogger != "file" && i.Host.EventLogger != "journald" {
+		return fmt.Errorf("event backend %q unsupported: configure events_logger=file in containers.conf", i.Host.EventLogger)
+	}
+	return nil
+}
 func (c *Client) Info(ctx context.Context) (Info, error) {
 	var i Info
 	err := c.get(ctx, route("info"), &i)

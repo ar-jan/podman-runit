@@ -27,10 +27,7 @@ func Timing(c podmanapi.Container) (interval, budget time.Duration, reason strin
 	if len(c.Config.StartupHealthCheck) > 0 && string(c.Config.StartupHealthCheck) != "null" {
 		return 0, 0, "unsupported Podman startup probe"
 	}
-	if h.Interval == nil {
-		return 0, 0, "automatic interval disabled"
-	}
-	if *h.Interval <= 0 {
+	if h.Interval == nil || *h.Interval <= 0 {
 		return 0, 0, "automatic interval disabled"
 	}
 	if *h.Interval > 365*24*time.Hour {

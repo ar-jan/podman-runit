@@ -49,11 +49,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	configHome := os.Getenv("XDG_CONFIG_HOME")
-	if configHome == "" {
-		configHome = filepath.Join(os.Getenv("HOME"), ".config")
-	}
-	o := userservices.Options{ConfigFile: filepath.Join(configHome, "podman-runit/common.conf"), Dir: dir, Assets: *assets, SchedulerOnly: *only, AdoptAPI: *adopt, DryRun: *dry, Out: os.Stdout}
+	o := userservices.Options{ConfigFile: config.CommonFile(), Dir: dir, Assets: *assets, SchedulerOnly: *only, AdoptAPI: *adopt, DryRun: *dry, Out: os.Stdout}
 	// disable never uses the socket, so it works without a runtime directory
 	// (for example from su or sudo during uninstall).
 	if command == "disable" {
@@ -186,11 +182,8 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		if info.Host.EventLogger != "file" && info.Host.EventLogger != "journald" {
-			return errors.New("configure events_logger=file in containers.conf")
-		}
-		if !info.Host.Security.Rootless {
-			return errors.New("rootful engine unsupported")
+		if err := podmanapi.CheckEngine(info); err != nil {
+			return err
 		}
 		if command == "doctor" {
 			fmt.Printf("engine=%s native=%s selected=%s compat=%s events=%s rootless=%t\n", v.Version, v.Native, podmanapi.NativeVersion, v.ApiVersion, info.Host.EventLogger, info.Host.Security.Rootless)
