@@ -1,3 +1,5 @@
+    ℹ️ This project is built with AI (mainly gpt-6-astra and opus-5.5). It works for me; use at your discretion.
+
 # podman-runit
 
 A lightweight Go healthcheck scheduler for rootless Podman on Void Linux,
