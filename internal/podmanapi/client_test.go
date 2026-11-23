@@ -75,6 +75,39 @@ func TestHealthNeverReplaysOrRedirects(t *testing.T) {
 		t.Fatal("redirect followed")
 	}
 }
+func TestHealthConcurrencyFollowsCallers(t *testing.T) {
+	// The scheduler allows up to 64 workers; the client must not cap them lower.
+	const callers = 16
+	var active atomic.Int32
+	release := make(chan struct{})
+	c := server(t, func(w http.ResponseWriter, r *http.Request) {
+		active.Add(1)
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+		w.Write([]byte(`{"Status":"healthy"}`))
+	})
+	errs := make(chan error, callers)
+	for i := 0; i < callers; i++ {
+		go func() { errs <- c.Health(context.Background(), strings.Repeat("a", 64)) }()
+	}
+	deadline := time.After(5 * time.Second)
+	for active.Load() < callers {
+		select {
+		case <-deadline:
+			close(release)
+			t.Fatalf("only %d of %d probes reached Podman concurrently", active.Load(), callers)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	close(release)
+	for i := 0; i < callers; i++ {
+		if err := <-errs; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
 func TestResponseContracts(t *testing.T) {
 	for _, code := range []int{200, 404, 409, 500} {
 		c := server(t, func(w http.ResponseWriter, r *http.Request) {

@@ -115,6 +115,11 @@ func New(socket string) *Client {
 			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 				return (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "unix", socket)
 			}}
+		if fresh {
+			// The scheduler's workers bound probe concurrency. A connection cap
+			// would only queue probes while their budget runs out unsent.
+			tr.MaxConnsPerHost = 0
+		}
 		return &http.Client{Transport: tr, Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}
 	// Go retries GETs only on previously used connections. Health executions always
