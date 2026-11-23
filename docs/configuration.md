@@ -79,6 +79,16 @@ stale socket only if it is owned by the same user, lives in a user-owned
 directory that no other user can write (`0700` or `0755`), refuses connections,
 and keeps an unchanged inode.
 
+On its first start, rootless Podman serves the API from a forked child. If the
+supervised parent is killed with `SIGKILL` (`sv kill`, `kill -9`, the OOM
+killer), that child keeps serving the socket and holding the endpoint lock, so
+every restart fails with `API endpoint already managed by pid N (...)`. If no
+other service manages that socket, stop the leftover API with the `kill`
+command in the message; runit then starts the managed API again.
+`podman-runit doctor` lists each lock holder and flags one that is not running
+under the `podman-api` service. A normal `sv down` or `sv restart` stops both
+processes.
+
 ## Turnstile, readiness, and lingering
 
 Turnstile loads `~/.config/service-env`; the service launchers import

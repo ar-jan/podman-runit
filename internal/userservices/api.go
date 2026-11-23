@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"podman-runit/internal/config"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -23,18 +25,65 @@ func ExecAPI(socket string) error {
 	if err != nil {
 		return err
 	}
-	fd, err := syscall.Open(filepath.Join(dir, "api.lock"), syscall.O_CREAT|syscall.O_RDWR|syscall.O_NOFOLLOW, 0600)
+	fd, err := lockAPI(dir, socket)
 	if err != nil {
 		return err
 	}
 	defer syscall.Close(fd)
-	if err := syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		return fmt.Errorf("API endpoint already managed: %w", err)
-	}
 	if err := prepareSocket(socket); err != nil {
 		return err
 	}
 	return syscall.Exec("/usr/bin/podman", []string{"podman", "system", "service", "--time=0", "unix://" + socket}, os.Environ())
+}
+
+// lockAPI takes the endpoint lock, deliberately without close-on-exec so that
+// the API process holds it. A busy lock names its holders.
+func lockAPI(dir, socket string) (int, error) {
+	path := filepath.Join(dir, APILock)
+	fd, err := syscall.Open(path, syscall.O_CREAT|syscall.O_RDWR|syscall.O_NOFOLLOW, 0600)
+	if err != nil {
+		return -1, err
+	}
+	err = syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB)
+	if err == nil {
+		return fd, nil
+	}
+	syscall.Close(fd)
+	holders, _ := config.LockHolders(path)
+	if len(holders) == 0 {
+		return -1, fmt.Errorf("API endpoint already managed: %w", err)
+	}
+	// On first start rootless Podman serves from a forked child that outlives
+	// a SIGKILLed parent and keeps this lock, so runit cannot restart the API.
+	return -1, fmt.Errorf("API endpoint already managed by %s; if no other service manages %s, that API outlived its supervisor (for example after sv kill): stop it with kill %s", describeHolders(holders), socket, holderPIDs(holders))
+}
+
+// APILock is the endpoint lock file in the socket's runtime directory.
+const APILock = "api.lock"
+
+func describeHolders(holders []config.Holder) string {
+	parts := make([]string, len(holders))
+	for i, h := range holders {
+		parts[i] = fmt.Sprintf("pid %d (%s)", h.PID, h.Exe)
+	}
+	return strings.Join(parts, ", ")
+}
+func holderPIDs(holders []config.Holder) string {
+	pids := make([]string, len(holders))
+	for i, h := range holders {
+		pids[i] = strconv.Itoa(h.PID)
+	}
+	return strings.Join(pids, " ")
+}
+
+// SupervisedPID returns the process runsv supervises for a service, or 0.
+func SupervisedPID(service string) int {
+	b, err := os.ReadFile(filepath.Join(service, "supervise/pid"))
+	if err != nil {
+		return 0
+	}
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+	return pid
 }
 
 func prepareSocket(socket string) error {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -94,6 +95,59 @@ func Lock(dir string) (*os.File, error) {
 	}
 	return f, nil
 }
+
+// Holder is a process with an open file that holds a flock.
+type Holder struct {
+	PID int
+	Exe string
+}
+
+// LockHolders lists same-user processes holding a flock on path, without
+// taking the lock. Unreadable processes are skipped.
+func LockHolders(path string) ([]Holder, error) {
+	target, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	fds, _ := filepath.Glob("/proc/[0-9]*/fd/[0-9]*")
+	var holders []Holder
+	seen := map[int]bool{}
+	for _, fd := range fds {
+		pid, _ := strconv.Atoi(strings.Split(fd, "/")[2])
+		if seen[pid] {
+			continue
+		}
+		if s, err := os.Stat(fd); err != nil || !os.SameFile(target, s) {
+			continue
+		}
+		info, err := os.ReadFile(strings.Replace(fd, "/fd/", "/fdinfo/", 1))
+		if err != nil || !strings.Contains(string(info), "FLOCK") {
+			continue
+		}
+		seen[pid] = true
+		exe, _ := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
+		holders = append(holders, Holder{pid, exe})
+	}
+	return holders, nil
+}
+
+// Descends reports whether pid is ancestor or one of its descendants.
+func Descends(pid, ancestor int) bool {
+	for n := 0; n < 64 && pid > 1; n++ {
+		if pid == ancestor {
+			return true
+		}
+		b, err := os.ReadFile(fmt.Sprintf("/proc/%d/status", pid))
+		if err != nil {
+			return false
+		}
+		_, after, _ := strings.Cut(string(b), "\nPPid:")
+		ppid, _ := strconv.Atoi(strings.TrimSpace(strings.SplitN(after, "\n", 2)[0]))
+		pid = ppid
+	}
+	return false
+}
+
 func Atomic(path string, b []byte) error {
 	f, err := os.CreateTemp(filepath.Dir(path), ".write-")
 	if err != nil {

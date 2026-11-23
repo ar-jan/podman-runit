@@ -97,6 +97,7 @@ func run() error {
 	case "doctor", "check-api":
 		c := podmanapi.New(socket)
 		defer c.Close()
+		unsupervised := 0
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if command == "doctor" {
@@ -158,6 +159,27 @@ func run() error {
 				if s, e := scheduler.ReadStatus(runtime); e == nil {
 					fmt.Printf("scheduler: %s updated=%s pid=%d\n", s.State, s.Updated.Format(time.RFC3339), s.PID)
 				}
+				// The managed API holds this lock; a holder outside the service's
+				// process tree outlived its supervisor and blocks restarts.
+				api := filepath.Join(dir, userservices.Names[0])
+				holders, e := config.LockHolders(filepath.Join(runtime, userservices.APILock))
+				switch {
+				case os.IsNotExist(e):
+					fmt.Println("API endpoint lock: absent")
+				case e != nil:
+					fmt.Printf("API endpoint lock: unavailable (%v)\n", e)
+				case len(holders) == 0:
+					fmt.Println("API endpoint lock: free")
+				}
+				supervised := userservices.SupervisedPID(api)
+				for _, h := range holders {
+					if supervised > 0 && config.Descends(h.PID, supervised) {
+						fmt.Printf("API endpoint lock: held by pid %d (%s), supervised by %s\n", h.PID, h.Exe, api)
+						continue
+					}
+					fmt.Printf("API endpoint lock: held by pid %d (%s), NOT supervised by %s; if no other service manages this socket, stop it with kill %d\n", h.PID, h.Exe, api, h.PID)
+					unsupervised++
+				}
 			}
 			fmt.Println("Single owner required: path aliases and other schedulers are not excluded by this lock. Services must remain running after logout (configure lingering separately).")
 		}
@@ -200,8 +222,15 @@ func run() error {
 					fmt.Printf("%s: %s\n", id, why)
 				}
 			}
+			var problems []string
+			if unsupervised > 0 {
+				problems = append(problems, fmt.Sprintf("%d unsupervised API process(es) hold the endpoint lock", unsupervised))
+			}
 			if failed > 0 {
-				return fmt.Errorf("%d of %d containers could not be inspected", failed, len(ids))
+				problems = append(problems, fmt.Sprintf("%d of %d containers could not be inspected", failed, len(ids)))
+			}
+			if len(problems) > 0 {
+				return errors.New(strings.Join(problems, "; "))
 			}
 		}
 		return nil

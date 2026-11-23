@@ -1,9 +1,12 @@
 package userservices
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -55,5 +58,33 @@ func TestSocketDirectoryModes(t *testing.T) {
 		if _, statErr := os.Lstat(socket); tc.ok != os.IsNotExist(statErr) {
 			t.Fatalf("mode %o: stale socket removed=%t", tc.mode, os.IsNotExist(statErr))
 		}
+	}
+}
+func TestBusyAPILockNamesHolder(t *testing.T) {
+	dir := t.TempDir()
+	fd, err := lockAPI(dir, "/run/test/api.sock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = lockAPI(dir, "/run/test/api.sock")
+	pid := os.Getpid()
+	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("by pid %d (", pid)) || !strings.Contains(err.Error(), fmt.Sprintf("kill %d", pid)) {
+		t.Fatalf("busy lock error does not name its holder: %v", err)
+	}
+	syscall.Close(fd)
+	if fd, err = lockAPI(dir, "/run/test/api.sock"); err != nil {
+		t.Fatal("released lock not reacquired:", err)
+	}
+	syscall.Close(fd)
+}
+func TestSupervisedPID(t *testing.T) {
+	service := t.TempDir()
+	if pid := SupervisedPID(service); pid != 0 {
+		t.Fatal("missing supervise directory gave", pid)
+	}
+	os.Mkdir(filepath.Join(service, "supervise"), 0700)
+	os.WriteFile(filepath.Join(service, "supervise/pid"), []byte("1234\n"), 0600)
+	if pid := SupervisedPID(service); pid != 1234 {
+		t.Fatal("supervised pid", pid)
 	}
 }

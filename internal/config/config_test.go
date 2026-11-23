@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"testing"
 )
 
@@ -63,4 +64,51 @@ func TestLockReleasedOnProcessExit(t *testing.T) {
 		t.Fatal("crashed process retained lock", err)
 	}
 	f.Close()
+}
+
+func TestLockHolders(t *testing.T) {
+	dir := t.TempDir()
+	lock, err := Lock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exe, _ := os.Executable()
+	holders, err := LockHolders(filepath.Join(dir, "lock"))
+	if err != nil || len(holders) != 1 || holders[0].PID != os.Getpid() || holders[0].Exe != exe {
+		t.Fatalf("holders %+v (%v), want this process %s", holders, err, exe)
+	}
+	lock.Close()
+	if holders, _ := LockHolders(filepath.Join(dir, "lock")); len(holders) != 0 {
+		t.Fatalf("released lock still held by %+v", holders)
+	}
+	// An open file without a flock has no holder.
+	plain, err := os.OpenFile(filepath.Join(dir, "plain"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer plain.Close()
+	if holders, _ := LockHolders(plain.Name()); len(holders) != 0 {
+		t.Fatalf("unlocked file reported as held by %+v", holders)
+	}
+	if _, err := LockHolders(filepath.Join(dir, "absent")); !os.IsNotExist(err) {
+		t.Fatal("missing lock file not reported", err)
+	}
+}
+func TestDescends(t *testing.T) {
+	self := os.Getpid()
+	child := exec.Command("sleep", "10")
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { child.Process.Kill(); child.Wait() }()
+	for _, tc := range []struct {
+		pid, ancestor int
+		want          bool
+	}{
+		{self, self, true}, {self, os.Getppid(), true}, {child.Process.Pid, self, true}, {self, child.Process.Pid, false}, {self, 0, false},
+	} {
+		if got := Descends(tc.pid, tc.ancestor); got != tc.want {
+			t.Fatalf("Descends(%d, %d) = %t", tc.pid, tc.ancestor, got)
+		}
+	}
 }
