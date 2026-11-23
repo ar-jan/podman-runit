@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -38,12 +39,28 @@ func Owned(path string) bool {
 	b, err := os.ReadFile(filepath.Join(path, Marker))
 	return err == nil && string(b) == "podman-runit-v1\n"
 }
+
+// runsv leaves its FIFOs behind on exit. Like sv, probe the ok FIFO for a
+// reader to distinguish a live supervisor from an offline service directory.
+func supervised(dir string) (bool, error) {
+	f, err := os.OpenFile(filepath.Join(dir, "supervise/ok"), os.O_WRONLY|syscall.O_NONBLOCK, 0)
+	if os.IsNotExist(err) || errors.Is(err, syscall.ENXIO) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, f.Close()
+}
 func control(dir, action string) error {
-	if _, err := os.Stat(filepath.Join(dir, "supervise/control")); err != nil {
-		return nil
+	if live, err := supervised(dir); err != nil || !live {
+		return err
 	}
 	cmd := exec.Command("sv", "-w", "15", action, dir)
 	if b, err := cmd.CombinedOutput(); err != nil {
+		if live, checkErr := supervised(dir); checkErr == nil && !live {
+			return nil
+		}
 		return fmt.Errorf("sv %s: %s: %w", action, b, err)
 	}
 	return nil
@@ -210,6 +227,7 @@ func Disable(o Options) error {
 	if o.SchedulerOnly {
 		names = names[1:]
 	}
+	var errs []error
 	for i := len(names) - 1; i >= 0; i-- {
 		dest := filepath.Join(o.Dir, names[i])
 		if !Owned(dest) {
@@ -218,12 +236,13 @@ func Disable(o Options) error {
 		fmt.Fprintf(o.Out, "disable %s (preserve files and logs)\n", dest)
 		if !o.DryRun {
 			if err := os.WriteFile(filepath.Join(dest, "down"), nil, 0600); err != nil {
-				return err
+				errs = append(errs, err)
+				continue
 			}
 			if err := control(dest, "down"); err != nil {
-				return err
+				errs = append(errs, err)
 			}
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }

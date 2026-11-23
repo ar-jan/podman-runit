@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 )
 
@@ -105,6 +106,32 @@ func TestRelativeAssets(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(o.Dir, name, p)); err != nil {
 				t.Fatalf("dangling %s/%s: %v", name, p, err)
 			}
+		}
+	}
+}
+
+func TestDisableOfflineServices(t *testing.T) {
+	o := opts(t)
+	if err := Enable(o); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range Names {
+		dir := filepath.Join(o.Dir, name, "supervise")
+		if err := os.Mkdir(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		for _, fifo := range []string{"ok", "control"} {
+			if err := syscall.Mkfifo(filepath.Join(dir, fifo), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := Disable(o); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range Names {
+		if _, err := os.Stat(filepath.Join(o.Dir, name, "down")); err != nil {
+			t.Fatal(err)
 		}
 	}
 }
