@@ -94,3 +94,17 @@ func TestDirectory(t *testing.T) {
 		t.Fatal("relative directory accepted")
 	}
 }
+func TestRelativeAssets(t *testing.T) {
+	o := opts(t)
+	o.Assets = "../../services" // relative to this package directory
+	if err := Enable(o); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range Names {
+		for _, p := range []string{"run", "check", "log/run"} {
+			if _, err := os.Stat(filepath.Join(o.Dir, name, p)); err != nil {
+				t.Fatalf("dangling %s/%s: %v", name, p, err)
+			}
+		}
+	}
+}

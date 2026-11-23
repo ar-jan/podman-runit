@@ -56,6 +56,13 @@ func Enable(o Options) error {
 			return errors.New("adopt-api and scheduler-only cannot be combined")
 		}
 	}
+	// Service symlinks resolve relative to the service directory, so they need
+	// absolute targets.
+	assets, err := filepath.Abs(o.Assets)
+	if err != nil {
+		return err
+	}
+	o.Assets = assets
 	// Validate all inputs before touching any service.
 	for _, name := range names {
 		for _, p := range []string{"run", "check", "log/run"} {
