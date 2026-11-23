@@ -157,10 +157,18 @@ func decode(res *http.Response, out any) error {
 		return err
 	}
 	if len(b) > maxResponse {
-		return errors.New("Podman response exceeds size limit")
+		return fmt.Errorf("%w: exceeds size limit", errUnusable)
 	}
-	return json.Unmarshal(b, out)
+	if err := json.Unmarshal(b, out); err != nil {
+		return fmt.Errorf("%w: %w", errUnusable, err)
+	}
+	return nil
 }
+
+// errUnusable marks a complete response whose body cannot be used, as opposed
+// to a connection that failed while reading it.
+var errUnusable = errors.New("unusable Podman response")
+
 func (c *Client) get(ctx context.Context, path string, out any) error {
 	c.metadataCount.Add(1)
 	res, err := request(ctx, c.metadata, path)
@@ -258,19 +266,38 @@ func (c *Client) List(ctx context.Context) ([]string, error) {
 	}
 	return ids, nil
 }
+
+// ContainerError reports an inspect failure confined to one container: Podman
+// answered, but with an error status or an unusable description. Races (404,
+// 409) and connection failures are returned as other errors.
+type ContainerError struct {
+	ID  string
+	Err error
+}
+
+func (e *ContainerError) Error() string { return e.Err.Error() }
+func (e *ContainerError) Unwrap() error { return e.Err }
+
 func (c *Client) Inspect(ctx context.Context, id string) (Container, error) {
 	var v Container
 	if !ValidID(id) {
 		return v, errors.New("invalid full container ID")
 	}
 	err := c.get(ctx, route("containers/"+id+"/json"), &v)
-	if err == nil && v.State.Running && v.State.StartedAt.IsZero() {
-		err = errors.New("running inspect missing start generation")
+	var httpErr *HTTPError
+	switch {
+	case IsRace(err):
+		return v, err
+	case errors.As(err, &httpErr) || errors.Is(err, errUnusable):
+		return v, &ContainerError{id, err}
+	case err != nil:
+		return v, err
+	case v.State.Running && v.State.StartedAt.IsZero():
+		return v, &ContainerError{id, errors.New("running inspect missing start generation")}
+	case v.ID != id:
+		return v, &ContainerError{id, errors.New("inspect ID mismatch")}
 	}
-	if err == nil && v.ID != id {
-		err = errors.New("inspect ID mismatch")
-	}
-	return v, err
+	return v, nil
 }
 
 // probeTimeout prefixes Podman's define.ErrHealthCheckTimeout message.

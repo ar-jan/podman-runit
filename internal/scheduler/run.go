@@ -175,6 +175,9 @@ func Run(ctx context.Context, c *podmanapi.Client, o Options) error {
 				for _, v := range u.Containers {
 					seen[v.ID] = true
 				}
+				for id := range u.Failed {
+					seen[id] = true
+				}
 				for id := range core.items {
 					if !seen[id] {
 						core.Remove(id)
@@ -205,6 +208,14 @@ func Run(ctx context.Context, c *podmanapi.Client, o Options) error {
 				if reason := core.Reasons[v.ID]; reason != old && strings.HasPrefix(reason, "unsupported") {
 					log.Printf("container %s: %s", v.ID, reason)
 				}
+			}
+			// Retried at the next reconcile or lifecycle event for the container.
+			for id, why := range u.Failed {
+				reason := "inspect failed: " + why
+				if core.Reasons[id] != reason {
+					log.Printf("container %s: %s", id, reason)
+				}
+				core.Exclude(id, reason)
 			}
 			writeStatus()
 		case <-due:

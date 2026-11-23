@@ -181,15 +181,27 @@ func run() error {
 			if err != nil {
 				return err
 			}
+			failed := 0
 			for _, id := range ids {
 				v, err := c.Inspect(ctx, id)
-				if err != nil {
+				var fault *podmanapi.ContainerError
+				switch {
+				case podmanapi.IsRace(err):
+					continue
+				case errors.As(err, &fault):
+					fmt.Printf("%s: inspect failed: %v\n", id, err)
+					failed++
+					continue
+				case err != nil:
 					return err
 				}
 				_, _, why := scheduler.Timing(v)
 				if why != "" {
 					fmt.Printf("%s: %s\n", id, why)
 				}
+			}
+			if failed > 0 {
+				return fmt.Errorf("%d of %d containers could not be inspected", failed, len(ids))
 			}
 		}
 		return nil

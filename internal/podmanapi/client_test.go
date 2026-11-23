@@ -3,6 +3,7 @@ package podmanapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -176,5 +177,37 @@ func TestEventBarrierIdleAndSchema(t *testing.T) {
 	err = ReadEvents(strings.NewReader(`{"Type":"container","Action":"start","Actor":{"ID":"`+strings.Repeat("b", 64)+`"},"timeNano":123}`+"\n"+`{"Type":"container","Action":"exec","Actor":{"ID":"`+strings.Repeat("b", 64)+`"}}`+"\n"), func(e Event) { count++ })
 	if count != 1 || err == nil {
 		t.Fatal(count, err)
+	}
+}
+func TestInspectFailureScope(t *testing.T) {
+	id := strings.Repeat("c", 64)
+	for _, tc := range []struct {
+		name      string
+		handler   http.HandlerFunc
+		container bool
+	}{
+		{"server error", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(500) }, true},
+		{"malformed body", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"Id":`)) }, true},
+		{"ID mismatch", func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte(`{"Id":"` + strings.Repeat("d", 64) + `"}`))
+		}, true},
+		{"running without start", func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte(`{"Id":"` + id + `","State":{"Running":true}}`))
+		}, true},
+		{"removed", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(404) }, false},
+		{"connection lost", func(w http.ResponseWriter, r *http.Request) {
+			conn, _, _ := w.(http.Hijacker).Hijack()
+			conn.Close()
+		}, false},
+	} {
+		c := server(t, tc.handler)
+		_, err := c.Inspect(context.Background(), id)
+		var fault *ContainerError
+		if err == nil || errors.As(err, &fault) != tc.container {
+			t.Fatalf("%s: %v (container fault %t)", tc.name, err, errors.As(err, &fault))
+		}
+		if tc.container && fault.ID != id {
+			t.Fatalf("%s: fault for %s", tc.name, fault.ID)
+		}
 	}
 }

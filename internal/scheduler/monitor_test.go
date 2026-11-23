@@ -125,3 +125,76 @@ func TestMonitorSnapshotRaceReplayOverflowReconnect(t *testing.T) {
 		t.Fatal("monitor goroutine leaked")
 	}
 }
+
+// fakeEngine serves a rootless Podman 6.1.4 listing ids, with an idle event
+// stream; inspect and probe answer for one container ID each.
+func fakeEngine(t *testing.T, ids []string, inspect, probe func(http.ResponseWriter, string)) (*podmanapi.Client, string) {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "pr-engine-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(dir, "api")
+	l, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/version":
+			w.Header().Set("Libpod-API-Version", "6.1.4")
+			fmt.Fprint(w, `{}`)
+		case strings.HasSuffix(r.URL.Path, "/info"):
+			fmt.Fprint(w, `{"host":{"eventLogger":"file","security":{"rootless":true}}}`)
+		case strings.HasSuffix(r.URL.Path, "/events"):
+			w.WriteHeader(200)
+			w.(http.Flusher).Flush()
+			<-r.Context().Done()
+		case strings.HasSuffix(r.URL.Path, "/containers/json"):
+			list := []map[string]string{}
+			for _, id := range ids {
+				list = append(list, map[string]string{"Id": id})
+			}
+			json.NewEncoder(w).Encode(list)
+		case strings.HasSuffix(r.URL.Path, "/healthcheck"):
+			probe(w, strings.Split(r.URL.Path, "/")[4])
+		default:
+			inspect(w, strings.Split(r.URL.Path, "/")[4])
+		}
+	})}
+	go server.Serve(l)
+	c := podmanapi.New(socket)
+	t.Cleanup(func() { c.Close(); server.Close(); os.RemoveAll(dir) })
+	return c, dir
+}
+
+// brokenInspect describes every container as fixture(1) except bad, for which
+// Podman fails as it does when a container's storage is missing.
+func brokenInspect(bad string) func(http.ResponseWriter, string) {
+	return func(w http.ResponseWriter, id string) {
+		if id == bad {
+			w.WriteHeader(500)
+			fmt.Fprint(w, `{"cause":"no such file or directory","message":"storage for container missing","response":500}`)
+			return
+		}
+		v := fixture(1)
+		v.ID = id
+		json.NewEncoder(w).Encode(v)
+	}
+}
+func TestSnapshotExcludesBrokenContainer(t *testing.T) {
+	good, bad := fixture(1).ID, fixture(2).ID
+	c, _ := fakeEngine(t, []string{good, bad}, brokenInspect(bad), nil)
+	u, err := snapshot(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !u.Full || len(u.Containers) != 1 || u.Containers[0].ID != good || !strings.Contains(u.Failed[bad], "storage for container missing") {
+		t.Fatalf("broken container not isolated: %+v", u)
+	}
+	// When every container fails, the engine is the likelier fault.
+	c, _ = fakeEngine(t, []string{bad}, brokenInspect(bad), nil)
+	if u, err := snapshot(context.Background(), c); err == nil || u.Full {
+		t.Fatalf("all-failed snapshot accepted: %+v", u)
+	}
+}

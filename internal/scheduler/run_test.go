@@ -136,8 +136,9 @@ func TestPartialSnapshotRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var listFails atomic.Bool
 	s := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "containers/json") {
+		if strings.HasSuffix(r.URL.Path, "containers/json") && !listFails.Load() {
 			fmt.Fprintf(w, `[{"Id":"%s"}]`, fixture(1).ID)
 		} else {
 			w.WriteHeader(500)
@@ -150,6 +151,10 @@ func TestPartialSnapshotRejected(t *testing.T) {
 	u, err := snapshot(context.Background(), c)
 	if err == nil || u.Full {
 		t.Fatal("partial snapshot accepted")
+	}
+	listFails.Store(true)
+	if u, err := snapshot(context.Background(), c); err == nil || u.Full {
+		t.Fatal("failed listing returned an authoritative snapshot")
 	}
 }
 func TestTimedOutProbeKeepsInterval(t *testing.T) {
@@ -218,5 +223,59 @@ func TestTimedOutProbeKeepsInterval(t *testing.T) {
 	cancel()
 	if err := <-finished; err != nil {
 		t.Fatal(err)
+	}
+}
+func TestBrokenContainerDoesNotStopOthers(t *testing.T) {
+	good, bad := fixture(1).ID, fixture(2).ID
+	var probes atomic.Int32
+	var badProbed atomic.Bool
+	c, dir := fakeEngine(t, []string{good, bad}, brokenInspect(bad), func(w http.ResponseWriter, id string) {
+		if id == bad {
+			badProbed.Store(true)
+		}
+		probes.Add(1)
+		fmt.Fprint(w, `{"Status":"healthy"}`)
+	})
+	// An in-doubt execution of the broken container must stay held.
+	b, _ := json.Marshal(map[string]time.Time{bad: time.Now().Add(time.Hour)})
+	if err := os.WriteFile(filepath.Join(dir, "pending.json"), b, 0600); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	finished := make(chan error, 1)
+	go func() {
+		finished <- Run(ctx, c, Options{Socket: "test", Runtime: dir, Workers: 1, Reconcile: time.Minute, Drain: 20 * time.Millisecond})
+	}()
+	deadline := time.After(5 * time.Second)
+	for probes.Load() < 3 {
+		select {
+		case <-deadline:
+			t.Fatalf("one broken container stopped all checks: %d probes", probes.Load())
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	s, err := ReadStatus(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.State != "ready" || !strings.HasPrefix(s.Excluded[bad], "inspect failed: ") {
+		t.Fatalf("state %q, excluded %q", s.State, s.Excluded[bad])
+	}
+	cancel()
+	if err := <-finished; err != nil {
+		t.Fatal(err)
+	}
+	if badProbed.Load() {
+		t.Fatal("uninspectable container probed")
+	}
+	b, err = os.ReadFile(filepath.Join(dir, "pending.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var holds map[string]time.Time
+	json.Unmarshal(b, &holds)
+	if _, ok := holds[bad]; !ok {
+		t.Fatal("recovery hold of broken container dropped")
 	}
 }

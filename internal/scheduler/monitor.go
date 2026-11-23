@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"time"
@@ -10,27 +11,54 @@ import (
 )
 
 type Update struct {
-	Full          bool
-	Containers    []podmanapi.Container
-	Removed       []string
+	Full       bool
+	Containers []podmanapi.Container
+	Removed    []string
+	// Failed maps containers that exist but could not be inspected to the
+	// reason. They stay known, so their recovery holds are kept.
+	Failed        map[string]string
 	State, Detail string
 }
 
+// inspect adds one container to u. Podman failing to describe this container
+// alone excludes it; only engine-level errors are returned.
+func inspect(ctx context.Context, c *podmanapi.Client, id string, u *Update) error {
+	v, err := c.Inspect(ctx, id)
+	var fault *podmanapi.ContainerError
+	switch {
+	case podmanapi.IsRace(err):
+		u.Removed = append(u.Removed, id)
+	case errors.As(err, &fault):
+		if u.Failed == nil {
+			u.Failed = map[string]string{}
+		}
+		u.Failed[id] = fault.Error()
+	case err != nil:
+		return err
+	default:
+		u.Containers = append(u.Containers, v)
+	}
+	return nil
+}
 func snapshot(ctx context.Context, c *podmanapi.Client) (Update, error) {
-	u := Update{Full: true, State: "ready"}
 	ids, err := c.List(ctx)
 	if err != nil {
-		return u, err
+		return Update{}, err
 	}
+	u := Update{Full: true, State: "ready"}
 	for _, id := range ids {
-		v, err := c.Inspect(ctx, id)
-		if podmanapi.IsRace(err) {
-			continue
-		}
-		if err != nil {
+		if err := inspect(ctx, c, id, &u); err != nil {
 			return Update{}, err
 		}
-		u.Containers = append(u.Containers, v)
+	}
+	// One broken container is excluded, but when every container fails the
+	// engine is the likelier fault: report it rather than claim readiness.
+	if len(u.Failed) > 0 && len(u.Containers) == 0 {
+		for _, id := range ids {
+			if reason, ok := u.Failed[id]; ok {
+				return Update{}, fmt.Errorf("inspect failed for all %d containers (%.12s: %s)", len(u.Failed), id, reason)
+			}
+		}
 	}
 	return u, nil
 }
@@ -154,13 +182,8 @@ func session(parent context.Context, c *podmanapi.Client, out chan<- Update, ref
 		case <-debounce.C:
 			u := Update{State: "ready"}
 			for id := range pending {
-				v, err := c.Inspect(ctx, id)
-				if podmanapi.IsRace(err) {
-					u.Removed = append(u.Removed, id)
-				} else if err != nil {
+				if err := inspect(ctx, c, id, &u); err != nil {
 					return err
-				} else {
-					u.Containers = append(u.Containers, v)
 				}
 			}
 			clear(pending)

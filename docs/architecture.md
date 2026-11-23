@@ -38,6 +38,14 @@ Metadata/event streaming and probes use separate connections:
   before the initial snapshot is taken, with a 2-second timestamp overlap. A
   bounded 256-event buffer triggers full reconciliation on overflow. Failed
   snapshots never erase known containers.
+- **Uninspectable containers:** When Podman answers an inspect with an error
+  or an unusable description for one container, only that container is
+  excluded (`inspect failed: …` in `status`, logged once per change) and keeps
+  its recovery hold. It is retried at the next reconciliation or on its next
+  lifecycle event. If every listed container fails, the snapshot is treated as
+  an engine failure: the scheduler waits and reconnects, so `check-scheduler`
+  fails. Timeouts and connection errors are always engine failures. `doctor`
+  lists every container it cannot inspect and exits non-zero.
 - **Reconnects:** Exponential backoff (250 ms–30 s with jitter), followed by a
   full snapshot before dispatch resumes.
 - **Reconciliation:** Periodic full reconciliation runs every 60 seconds by

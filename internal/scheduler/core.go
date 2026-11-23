@@ -105,11 +105,17 @@ func (c *Core) Remove(id string) {
 	}
 	delete(c.Reasons, id)
 }
+
+// Exclude stops scheduling a known container. Its recovery hold is kept, so a
+// later Update cannot probe it again before an in-doubt execution expires.
+func (c *Core) Exclude(id, reason string) {
+	c.Remove(id)
+	c.Reasons[id] = reason
+}
 func (c *Core) Update(v podmanapi.Container, now time.Time) {
 	interval, budget, reason := Timing(v)
 	if reason != "" {
-		c.Remove(v.ID)
-		c.Reasons[v.ID] = reason
+		c.Exclude(v.ID, reason)
 		return
 	}
 	delete(c.Reasons, v.ID)
