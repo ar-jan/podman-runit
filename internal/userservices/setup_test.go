@@ -4,6 +4,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -106,5 +108,167 @@ func TestRelativeAssets(t *testing.T) {
 				t.Fatalf("dangling %s/%s: %v", name, p, err)
 			}
 		}
+	}
+}
+
+func TestDisableOfflineServices(t *testing.T) {
+	o := opts(t)
+	if err := Enable(o); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range Names {
+		dir := filepath.Join(o.Dir, name, "supervise")
+		if err := os.Mkdir(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		for _, fifo := range []string{"ok", "control"} {
+			if err := syscall.Mkfifo(filepath.Join(dir, fifo), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := Disable(o); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range Names {
+		if _, err := os.Stat(filepath.Join(o.Dir, name, "down")); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestAdoptionKeepsManualServiceOnFailure(t *testing.T) {
+	for _, problem := range []string{"dangling logger", "activation", "activation while down"} {
+		t.Run(problem, func(t *testing.T) {
+			o := opts(t)
+			o.AdoptAPI = true
+			dest := filepath.Join(o.Dir, "podman-api")
+			if err := os.MkdirAll(filepath.Join(dest, "supervise"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			write := func(path, content string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(dest, path), []byte(content), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			write("run", "#!/bin/sh\nexit 0\n")
+			write("check", "original check")
+			if problem == "dangling logger" {
+				if err := os.Symlink("missing", filepath.Join(dest, "log")); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				// Simulate a live supervisor which rejects only the replacement.
+				// Its previous request can differ from the persistent down marker.
+				ok := filepath.Join(dest, "supervise/ok")
+				if err := syscall.Mkfifo(ok, 0600); err != nil {
+					t.Fatal(err)
+				}
+				reader, err := os.OpenFile(ok, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer reader.Close()
+				status := make([]byte, 20)
+				status[17] = 'u'
+				if problem == "activation while down" {
+					status[17] = 'd'
+					write("down", "original down")
+				}
+				write("supervise/status", string(status))
+				write("sv", "#!/bin/sh\necho \"$3\" >> \"$4/actions\"\n[ \"$3\" != up ] || [ ! -f \"$4/.podman-runit-owned\" ]\n")
+				t.Setenv("PATH", dest+":"+os.Getenv("PATH"))
+			}
+			if err := Enable(o); err == nil {
+				t.Fatal("expected adoption to fail")
+			}
+			for name, want := range map[string]string{"run": "#!/bin/sh\nexit 0\n", "check": "original check"} {
+				b, err := os.ReadFile(filepath.Join(dest, name))
+				if err != nil || string(b) != want {
+					t.Fatal(name, string(b), err)
+				}
+			}
+			if Owned(dest) {
+				t.Fatal("failed adoption claimed manual service")
+			}
+			down, err := os.ReadFile(filepath.Join(dest, "down"))
+			if problem == "activation while down" {
+				if err != nil || string(down) != "original down" {
+					t.Fatal("lost original down marker", err)
+				}
+			} else if !os.IsNotExist(err) {
+				t.Fatal("left service disabled", err)
+			}
+			if problem != "dangling logger" {
+				actions, _ := os.ReadFile(filepath.Join(dest, "actions"))
+				want := "down up down"
+				if problem == "activation" {
+					want += " up"
+				}
+				if strings.Join(strings.Fields(string(actions)), " ") != want {
+					t.Fatal("wrong runtime state", string(actions))
+				}
+				for _, name := range []string{"log", "conf"} {
+					if _, err := os.Lstat(filepath.Join(dest, name)); !os.IsNotExist(err) {
+						t.Fatal("left staged entry", name)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestLoggerEnablement(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		o := opts(t)
+		if err := Enable(o); err != nil {
+			t.Fatal(err)
+		}
+		dest := filepath.Join(o.Dir, Names[0])
+		logger := filepath.Join(dest, "log")
+		if legacy {
+			if err := os.WriteFile(filepath.Join(dest, Marker), []byte(legacyOwnership), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Remove(filepath.Join(logger, Marker)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := Disable(o); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(filepath.Join(logger, "down")); err != nil {
+			t.Fatal("logger not persistently down", err)
+		}
+		if err := Enable(o); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(filepath.Join(logger, "down")); !os.IsNotExist(err) {
+			t.Fatal("logger still disabled", err)
+		}
+	}
+}
+
+func TestAdoptedLoggerKeepsOwnState(t *testing.T) {
+	o := opts(t)
+	o.AdoptAPI = true
+	dest := filepath.Join(o.Dir, Names[0])
+	logger := filepath.Join(dest, "log")
+	if err := os.MkdirAll(logger, 0700); err != nil {
+		t.Fatal(err)
+	}
+	// A manual service may have chosen even the packaged log script.
+	if err := os.Symlink(filepath.Join(o.Assets, Names[0], "log/run"), filepath.Join(logger, "run")); err != nil {
+		t.Fatal(err)
+	}
+	if err := Enable(o); err != nil {
+		t.Fatal(err)
+	}
+	if err := Disable(o); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(logger, "down")); !os.IsNotExist(err) {
+		t.Fatal("manual logger was disabled", err)
 	}
 }

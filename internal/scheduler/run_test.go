@@ -148,12 +148,12 @@ func TestPartialSnapshotRejected(t *testing.T) {
 	defer s.Close()
 	c := podmanapi.New(socket)
 	defer c.Close()
-	u, err := snapshot(context.Background(), c)
+	u, err := snapshot(context.Background(), c, nil)
 	if err == nil || u.Full {
 		t.Fatal("partial snapshot accepted")
 	}
 	listFails.Store(true)
-	if u, err := snapshot(context.Background(), c); err == nil || u.Full {
+	if u, err := snapshot(context.Background(), c, nil); err == nil || u.Full {
 		t.Fatal("failed listing returned an authoritative snapshot")
 	}
 }
@@ -277,5 +277,30 @@ func TestBrokenContainerDoesNotStopOthers(t *testing.T) {
 	json.Unmarshal(b, &holds)
 	if _, ok := holds[bad]; !ok {
 		t.Fatal("recovery hold of broken container dropped")
+	}
+}
+
+func TestImportJournalKeepsLongestHold(t *testing.T) {
+	old, shared := t.TempDir(), t.TempDir()
+	early, late := time.Now().UTC(), time.Now().UTC().Add(time.Hour)
+	for dir, holds := range map[string]map[string]time.Time{
+		old: {"a": early, "b": late}, shared: {"a": late},
+	} {
+		b, err := json.Marshal(holds)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "pending.json"), b, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 2 {
+		if err := ImportJournal(old, shared); err != nil {
+			t.Fatal(err)
+		}
+	}
+	holds, err := readHolds(filepath.Join(shared, "pending.json"))
+	if err != nil || !holds["a"].Equal(late) || !holds["b"].Equal(late) {
+		t.Fatal(holds, err)
 	}
 }

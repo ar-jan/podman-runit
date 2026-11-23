@@ -45,17 +45,62 @@ type result struct {
 	err error
 }
 
+func readHolds(path string) (map[string]time.Time, error) {
+	holds := make(map[string]time.Time)
+	b, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return holds, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(b, &holds); err != nil {
+		return nil, fmt.Errorf("invalid recovery journal %s: %w", path, err)
+	}
+	if holds == nil {
+		holds = make(map[string]time.Time)
+	}
+	return holds, nil
+}
+
+// ImportJournal merges old execution intents under both scheduler locks.
+// Retire the old journal only after the merged one has been written.
+func ImportJournal(legacy, dir string) error {
+	old := filepath.Join(legacy, "pending.json")
+	if _, err := os.Stat(old); os.IsNotExist(err) {
+		return nil
+	}
+	previous, err := readHolds(old)
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(dir, "pending.json")
+	current, err := readHolds(path)
+	if err != nil {
+		return err
+	}
+	for id, deadline := range previous {
+		if deadline.After(current[id]) {
+			current[id] = deadline
+		}
+	}
+	b, err := json.Marshal(current)
+	if err != nil {
+		return err
+	}
+	if err := config.Atomic(path, b); err != nil {
+		return err
+	}
+	return os.Remove(old)
+}
+
 func Run(ctx context.Context, c *podmanapi.Client, o Options) error {
 	if o.Workers < 1 || o.Workers > 64 || o.Reconcile < time.Second || o.Drain < 0 {
 		return errors.New("invalid scheduler bounds")
 	}
-	holds := map[string]time.Time{}
 	journal := filepath.Join(o.Runtime, "pending.json")
-	if b, err := os.ReadFile(journal); err == nil {
-		if err := json.Unmarshal(b, &holds); err != nil {
-			return fmt.Errorf("invalid recovery journal: %w", err)
-		}
-	} else if !os.IsNotExist(err) {
+	holds, err := readHolds(journal)
+	if err != nil {
 		return err
 	}
 	core := NewCore(holds)

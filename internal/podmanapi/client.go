@@ -263,9 +263,17 @@ func ValidID(id string) bool {
 	}
 	return true
 }
+
+// ErrListTimeout means the all-container listing timed out while /_ping still
+// answered. Known containers can still be inspected individually.
+var ErrListTimeout = errors.New("container listing timed out while Podman stayed responsive")
+
 func (c *Client) List(ctx context.Context) ([]string, error) {
 	var entries []struct{ ID string }
 	if err := c.get(ctx, route("containers/json?all=true"), &entries); err != nil {
+		if c.responsiveAfterTimeout(ctx, err) {
+			return nil, fmt.Errorf("%w: %w", ErrListTimeout, err)
+		}
 		return nil, err
 	}
 	ids := make([]string, 0, len(entries))
@@ -296,7 +304,6 @@ func (c *Client) Inspect(ctx context.Context, id string) (Container, error) {
 	}
 	err := c.get(ctx, route("containers/"+id+"/json"), &v)
 	var httpErr *HTTPError
-	var netErr net.Error
 	switch {
 	case IsRace(err):
 		return v, err
@@ -305,7 +312,7 @@ func (c *Client) Inspect(ctx context.Context, id string) (Container, error) {
 	// Inspect waits for the container's lock, which a stuck operation on that
 	// container can hold indefinitely. If Podman still answers a lock-free
 	// request, the timeout belongs to this container, not the engine.
-	case errors.As(err, &netErr) && netErr.Timeout() && ctx.Err() == nil && c.responsive(ctx):
+	case c.responsiveAfterTimeout(ctx, err):
 		return v, &ContainerError{id, fmt.Errorf("inspect timed out after %s while Podman stayed responsive", c.metadata.Timeout)}
 	case err != nil:
 		return v, err
@@ -317,9 +324,12 @@ func (c *Client) Inspect(ctx context.Context, id string) (Container, error) {
 	return v, nil
 }
 
-// responsive reports whether Podman promptly answers /_ping, which takes no
-// container lock.
-func (c *Client) responsive(ctx context.Context) bool {
+// /_ping takes no container lock, even when list or inspect has timed out.
+func (c *Client) responsiveAfterTimeout(ctx context.Context, err error) bool {
+	var netErr net.Error
+	if !errors.As(err, &netErr) || !netErr.Timeout() || ctx.Err() != nil {
+		return false
+	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	c.metadataCount.Add(1)

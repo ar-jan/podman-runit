@@ -15,7 +15,9 @@ Colon-separated search paths are rejected.
 and `podman-healthcheckd`) with individual script symlinks into
 `/usr/share/podman-runit/services`. New definitions are staged with `down`
 before activation. Repeated `enable`/`disable` runs preserve local `conf`,
-logs, and supervision data. `--dry-run` reports planned actions without
+logs, and supervision data. Disabling a service stops its packaged logger
+after the service and marks both down for the next login. Enabling starts the
+logger first. A logger retained during adoption stays under its owner's control. `--dry-run` reports planned actions without
 modifying files or controlling services.
 
 ### Existing API services
@@ -40,7 +42,8 @@ podman-runit enable --adopt-api
 
 Adoption stops only that API service, backs up its `run`/`check` scripts into a
 unique `.before-adoption-*` directory, preserves its logger and local `conf`,
-and links the packaged scripts.
+and links the packaged scripts. If installation or the supervised startup
+check fails, the helper restores the original files and runsv request.
 
 ## Configuration files and precedence
 
@@ -115,7 +118,10 @@ per configuration change.
 - **Upgrading:** Package-owned symlinks pick up updated scripts on the next
   service restart. Restart `podman-api` and `podman-healthcheckd` after
   upgrading binaries (keep both stopped during replacement if the launch
-  protocol changes). The recovery journal prevents immediate duplicate probes
+  protocol changes). When upgrading a scheduler with a custom runtime directory,
+  stop the old scheduler and start the new version once with that same
+  `XDG_RUNTIME_DIR` so it can import any outstanding recovery holds. The
+  recovery journal prevents immediate duplicate probes
   across a scheduler restart.
 - **Uninstalling:** Run `podman-runit disable` as each user who enabled the
   services, then remove the package with `xbps-remove`. User service

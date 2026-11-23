@@ -18,6 +18,9 @@ import (
 	"time"
 )
 
+// Set by make when installing outside the distribution prefix.
+var defaultAssets = "/usr/share/podman-runit/services"
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -34,7 +37,7 @@ func run() error {
 	command := os.Args[1]
 	f := flag.NewFlagSet(command, flag.ContinueOnError)
 	dirFlag := f.String("service-dir", "", "one user runit service directory")
-	assets := f.String("assets", "/usr/share/podman-runit/services", "packaged service assets")
+	assets := f.String("assets", defaultAssets, "packaged service assets")
 	socketFlag := f.String("socket", "", "absolute Unix socket")
 	only := f.Bool("scheduler-only", false, "reuse independently managed API")
 	adopt := f.Bool("adopt-api", false, "explicitly adopt manual API, backing up run/check and retaining logger")
@@ -73,7 +76,7 @@ func run() error {
 		}
 		return userservices.Enable(o)
 	case "status", "check-scheduler":
-		runtime, err := config.RuntimePath(socket)
+		runtime, err := config.SchedulerPath(socket)
 		if err != nil {
 			return err
 		}
@@ -94,8 +97,9 @@ func run() error {
 		c := podmanapi.New(socket)
 		defer c.Close()
 		unsupervised := 0
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
+		// The client bounds each metadata request. A large store or several
+		// blocked inspections can legitimately take longer than one deadline.
+		ctx := context.Background()
 		if command == "doctor" {
 			self, _ := os.Executable()
 			fmt.Printf("podman-runit helper: %s (0.1.0)\n", self)
@@ -131,7 +135,7 @@ func run() error {
 					fmt.Print(string(b))
 				}
 			}
-			runtime, err := config.RuntimePath(socket)
+			runtime, err := config.SchedulerPath(socket)
 			if err == nil {
 				// List holders instead of trying the lock: even a brief probe
 				// would make a scheduler starting at that moment exit.
@@ -150,6 +154,9 @@ func run() error {
 				if s, e := scheduler.ReadStatus(runtime); e == nil {
 					fmt.Printf("scheduler: %s updated=%s pid=%d\n", s.State, s.Updated.Format(time.RFC3339), s.PID)
 				}
+			}
+			runtime, err = config.RuntimePath(socket)
+			if err == nil {
 				// The managed API holds this lock; a holder outside the service's
 				// process tree outlived its supervisor and blocks restarts.
 				api := filepath.Join(dir, userservices.Names[0])

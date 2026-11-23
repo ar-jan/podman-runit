@@ -1,2 +1,3 @@
 #!/bin/sh
-exec /usr/share/podman-runit/services/launch podman-api "$@"
+script=$(readlink -f "$0") || exit 1
+exec "${script%/*}/../launch" podman-api "$@"

@@ -185,7 +185,7 @@ func brokenInspect(bad string) func(http.ResponseWriter, string) {
 func TestSnapshotExcludesBrokenContainer(t *testing.T) {
 	good, bad := fixture(1).ID, fixture(2).ID
 	c, _ := fakeEngine(t, []string{good, bad}, brokenInspect(bad), nil)
-	u, err := snapshot(context.Background(), c)
+	u, err := snapshot(context.Background(), c, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,44 @@ func TestSnapshotExcludesBrokenContainer(t *testing.T) {
 	}
 	// When every container fails, the engine is the likelier fault.
 	c, _ = fakeEngine(t, []string{bad}, brokenInspect(bad), nil)
-	if u, err := snapshot(context.Background(), c); err == nil || u.Full {
+	if u, err := snapshot(context.Background(), c, nil); err == nil || u.Full {
 		t.Fatalf("all-failed snapshot accepted: %+v", u)
+	}
+}
+
+func TestSnapshotRevalidatesKnownIDsWhenListTimesOut(t *testing.T) {
+	good, bad, gone := fixture(1).ID, fixture(2).ID, fixture(3).ID
+	dir, err := os.MkdirTemp("", "pr-list-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	socket := filepath.Join(dir, "api")
+	l, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/containers/json"):
+			<-r.Context().Done()
+		case r.URL.Path == "/_ping":
+			fmt.Fprint(w, "OK")
+		case strings.Contains(r.URL.Path, gone):
+			w.WriteHeader(http.StatusNotFound)
+		case strings.Contains(r.URL.Path, bad):
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			json.NewEncoder(w).Encode(fixture(1))
+		}
+	})}
+	go server.Serve(l)
+	defer server.Close()
+	c := podmanapi.New(socket)
+	defer c.Close()
+	u, err := snapshot(t.Context(), c, map[string]bool{good: true, bad: true, gone: true})
+	if err != nil || u.Full || u.State != "ready" || u.Detail == "" || len(u.Containers) != 1 || u.Containers[0].ID != good ||
+		u.Failed[bad] == "" || len(u.Removed) != 1 || u.Removed[0] != gone {
+		t.Fatalf("partial revalidation: %+v, %v", u, err)
 	}
 }

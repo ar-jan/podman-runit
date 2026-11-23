@@ -2,7 +2,7 @@
 """Isolated, opt-in stock Podman contract and scheduler smoke suite.
 Never reads or modifies the user's container store or API service.
 """
-import argparse, json, os, pathlib, shutil, shlex, subprocess, tempfile, time
+import argparse, hashlib, json, os, pathlib, pwd, shutil, shlex, subprocess, tempfile, time
 
 p = argparse.ArgumentParser()
 p.add_argument('--podman', required=True, type=pathlib.Path)
@@ -19,6 +19,10 @@ env.update(XDG_RUNTIME_DIR=str(runtime), CONTAINERS_CONF=str(conf), CONTAINERS_C
 (work/'storage.conf').write_text(f'[storage]\ndriver="vfs"\nrunroot="{work}/runroot"\ngraphroot="{work}/storage"\n')
 base = [str(a.podman.resolve()), '--root', str(work/'storage'), '--runroot', str(work/'runroot'), '--storage-driver', 'vfs', '--cgroup-manager', 'cgroupfs', '--events-backend', 'file', '--network-config-dir', str(work/'networks')]
 socket = runtime/'api.sock'
+# This randomly named socket has its own scheduler state, shared across launches.
+uid_runtime = pathlib.Path('/run/user')/str(os.getuid())
+state_root = uid_runtime if socket.is_relative_to(uid_runtime) else pathlib.Path(pwd.getpwuid(os.getuid()).pw_dir)/'.local/state'
+scheduler_dir = state_root/'podman-runit'/hashlib.sha256(os.fsencode(socket)).hexdigest()[:24]
 processes=[]; ids=[]; evidence={}; logs=[]
 class Managed:
     def __init__(self, command, log):
@@ -45,7 +49,7 @@ def process_ids():
         try:
             for thread in pathlib.Path(f'/proc/{pid}/task').iterdir():
                 for child in (thread/'children').read_text().split():visit(int(child))
-        except FileNotFoundError:pass
+        except (FileNotFoundError, ProcessLookupError):pass
     for proc in processes:
         if proc.poll() is None:visit(proc.runner.pid)
     return found
@@ -58,7 +62,7 @@ def metrics():
             smaps=pathlib.Path(f'/proc/{pid}/smaps_rollup').read_text()
             def field(text,name):return int(next(line.split()[1] for line in text.splitlines() if line.startswith(name+':')))
             rows[pid]={'name':status.splitlines()[0].split()[1], 'rss_kib':field(status,'VmRSS'),'pss_kib':field(smaps,'Pss'),'cpu_ticks':int(stat[11])+int(stat[12]),'fds':len(list(pathlib.Path(f'/proc/{pid}/fd').iterdir()))}
-        except (FileNotFoundError,StopIteration,PermissionError):pass
+        except (FileNotFoundError, ProcessLookupError, StopIteration, PermissionError):pass
     return rows
 def sample(name,seconds=3):
     before=metrics();start=time.monotonic();time.sleep(seconds);after=metrics()
@@ -163,8 +167,7 @@ try:
     evidence['checks']=['CMD and CMD-SHELL health commands','first success during start_period','retries/unhealthy','timeout','disabled interval','startup excluded','failure action stop','interval update','scheduler restart','API restart','actual Docker Compose service_healthy']
     evidence['scheduler_proc_status']=(pathlib.Path('/proc')/str(scheduler.pid)/'status').read_text()
     evidence['api_proc_status']=(pathlib.Path('/proc')/str(api_proc.pid)/'status').read_text()
-    status_files=list(runtime.glob('podman-runit/*/status.json'))
-    evidence['scheduler_status']=json.loads(status_files[0].read_text())
+    evidence['scheduler_status']=json.loads((scheduler_dir/'status.json').read_text())
     evidence['result']='passed'
 finally:
     for proc in reversed(processes):
@@ -174,6 +177,9 @@ finally:
     # Explicitly isolated storage arguments, even if Compose set remote env.
     env.pop('CONTAINER_HOST',None);env.pop('DOCKER_HOST',None)
     cli('rm','-af',check=False)
+    if scheduler_dir.exists():
+        shutil.copytree(scheduler_dir, work/'scheduler-state')
+        shutil.rmtree(scheduler_dir)
     for log in logs:log.close()
     (work/'evidence.json').write_text(json.dumps(evidence,indent=2))
     print('Evidence:',work)
