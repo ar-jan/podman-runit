@@ -1,4 +1,5 @@
-    ℹ️ This project is built with AI (mainly gpt-6-astra and opus-5.5). It works for me; use at your discretion.
+> ℹ️ This project is built with AI (mainly gpt-6-astra, gpt-6.2-astra, and opus-5.5).
+> It works for me; use at your discretion.
 
 # podman-runit
 
