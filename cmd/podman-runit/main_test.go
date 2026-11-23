@@ -157,3 +157,49 @@ func TestDoctorFlagsUnsupervisedAPILockHolder(t *testing.T) {
 		t.Fatalf("unsupervised holder not flagged:\n%s", out)
 	}
 }
+
+func TestDoctorNeverTakesSchedulerLock(t *testing.T) {
+	socket := engine(t, `[]`, nil)
+	xdg := t.TempDir()
+	os.Chmod(xdg, 0700)
+	t.Setenv("XDG_RUNTIME_DIR", xdg)
+	runtime, err := config.Runtime(socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lock, err := config.Lock(runtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	// A doctor that never opens the lock file cannot take it, even briefly,
+	// so a scheduler starting at that moment never finds it busy.
+	watch, err := syscall.InotifyInit1(syscall.IN_NONBLOCK | syscall.IN_CLOEXEC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer syscall.Close(watch)
+	if _, err := syscall.InotifyAddWatch(watch, filepath.Join(runtime, config.SchedulerLock), syscall.IN_OPEN); err != nil {
+		t.Fatal(err)
+	}
+	opened := func() bool {
+		buf := make([]byte, 4096)
+		n, err := syscall.Read(watch, buf)
+		return err == nil && n > 0
+	}
+	out, err := doctor(t, socket, t.TempDir())
+	if err != nil || !strings.Contains(out, fmt.Sprintf("socket scheduler lock: held by pid %d (", os.Getpid())) {
+		t.Fatalf("held lock: %v\n%s", err, out)
+	}
+	if opened() {
+		t.Fatal("doctor opened the held scheduler lock")
+	}
+	lock.Close()
+	out, err = doctor(t, socket, t.TempDir())
+	if err != nil || !strings.Contains(out, "socket scheduler lock: free") {
+		t.Fatalf("free lock: %v\n%s", err, out)
+	}
+	if opened() {
+		t.Fatal("doctor opened the free scheduler lock")
+	}
+}

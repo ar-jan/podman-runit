@@ -137,24 +137,19 @@ func run() error {
 			}
 			runtime, err := config.RuntimePath(socket)
 			if err == nil {
-				lock, e := os.OpenFile(filepath.Join(runtime, "lock"), os.O_RDWR, 0)
-				if e == nil {
-					e = syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-				}
-				if e == nil {
-					lock.Close()
+				// List holders instead of trying the lock: even a brief probe
+				// would make a scheduler starting at that moment exit.
+				owners, e := config.LockHolders(filepath.Join(runtime, config.SchedulerLock))
+				switch {
+				case os.IsNotExist(e):
+					fmt.Println("socket scheduler lock: absent")
+				case e != nil:
+					fmt.Printf("socket scheduler lock: unavailable (%v)\n", e)
+				case len(owners) == 0:
 					fmt.Println("socket scheduler lock: free")
-				} else {
-					if lock != nil {
-						lock.Close()
-					}
-					if os.IsNotExist(e) {
-						fmt.Println("socket scheduler lock: absent")
-					} else if errors.Is(e, syscall.EWOULDBLOCK) {
-						fmt.Println("socket scheduler lock: held")
-					} else {
-						fmt.Printf("socket scheduler lock: unavailable (%v)\n", e)
-					}
+				}
+				for _, h := range owners {
+					fmt.Printf("socket scheduler lock: held by %s\n", h)
 				}
 				if s, e := scheduler.ReadStatus(runtime); e == nil {
 					fmt.Printf("scheduler: %s updated=%s pid=%d\n", s.State, s.Updated.Format(time.RFC3339), s.PID)
@@ -174,10 +169,10 @@ func run() error {
 				supervised := userservices.SupervisedPID(api)
 				for _, h := range holders {
 					if supervised > 0 && config.Descends(h.PID, supervised) {
-						fmt.Printf("API endpoint lock: held by pid %d (%s), supervised by %s\n", h.PID, h.Exe, api)
+						fmt.Printf("API endpoint lock: held by %s, supervised by %s\n", h, api)
 						continue
 					}
-					fmt.Printf("API endpoint lock: held by pid %d (%s), NOT supervised by %s; if no other service manages this socket, stop it with kill %d\n", h.PID, h.Exe, api, h.PID)
+					fmt.Printf("API endpoint lock: held by %s, NOT supervised by %s; if no other service manages this socket, stop it with kill %d\n", h, api, h.PID)
 					unsupervised++
 				}
 			}

@@ -84,11 +84,11 @@ func Runtime(socket string) (string, error) {
 	return dir, PrivateDir(dir)
 }
 func Lock(dir string) (*os.File, error) {
-	fd, err := syscall.Open(filepath.Join(dir, "lock"), syscall.O_CREAT|syscall.O_RDWR|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0600)
+	fd, err := syscall.Open(filepath.Join(dir, SchedulerLock), syscall.O_CREAT|syscall.O_RDWR|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0600)
 	if err != nil {
 		return nil, err
 	}
-	f := os.NewFile(uintptr(fd), "lock")
+	f := os.NewFile(uintptr(fd), SchedulerLock)
 	if err := syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		f.Close()
 		return nil, fmt.Errorf("scheduler already owns this socket: %w", err)
@@ -96,11 +96,16 @@ func Lock(dir string) (*os.File, error) {
 	return f, nil
 }
 
+// SchedulerLock is the scheduler's lock file in the socket's runtime directory.
+const SchedulerLock = "lock"
+
 // Holder is a process with an open file that holds a flock.
 type Holder struct {
 	PID int
 	Exe string
 }
+
+func (h Holder) String() string { return fmt.Sprintf("pid %d (%s)", h.PID, h.Exe) }
 
 // LockHolders lists same-user processes holding a flock on path, without
 // taking the lock. Unreadable processes are skipped.

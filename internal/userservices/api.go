@@ -64,7 +64,7 @@ const APILock = "api.lock"
 func describeHolders(holders []config.Holder) string {
 	parts := make([]string, len(holders))
 	for i, h := range holders {
-		parts[i] = fmt.Sprintf("pid %d (%s)", h.PID, h.Exe)
+		parts[i] = h.String()
 	}
 	return strings.Join(parts, ", ")
 }
