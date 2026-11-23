@@ -143,86 +143,98 @@ func Enable(o Options) error {
 	if err := os.MkdirAll(o.Dir, 0700); err != nil {
 		return err
 	}
+	lock, err := lockServiceDir(o.Dir)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
 	for _, name := range names {
-		dest := filepath.Join(o.Dir, name)
-		if Owned(dest) {
-			if err := os.Remove(filepath.Join(dest, "down")); err != nil && !os.IsNotExist(err) {
-				return err
-			}
-			if err := control(dest, "up"); err != nil {
-				return err
-			}
-			continue
-		}
-		_, err := os.Stat(dest)
-		adopting := err == nil
-		stage := dest
-		if adopting {
-			if err := os.WriteFile(filepath.Join(dest, "down"), nil, 0600); err != nil {
-				return err
-			}
-			if err := control(dest, "down"); err != nil {
-				return err
-			}
-			backup, err := os.MkdirTemp(dest, ".before-adoption-")
-			if err != nil {
-				return err
-			}
-			for _, p := range []string{"run", "check"} {
-				if _, err := os.Lstat(filepath.Join(dest, p)); err == nil {
-					if err := os.Rename(filepath.Join(dest, p), filepath.Join(backup, p)); err != nil {
-						return err
-					}
-				}
-			}
-		} else {
-			stage, err = os.MkdirTemp(o.Dir, ".podman-runit-")
-			if err != nil {
-				return err
-			}
-		}
-		if err := install(stage, name, o.Assets); err != nil {
-			return err
-		}
-		if !adopting {
-			if err := os.Rename(stage, dest); err != nil {
-				return err
-			}
-		}
-		if err := os.Remove(filepath.Join(dest, "down")); err != nil {
-			return err
-		}
-		if err := control(dest, "up"); err != nil {
+		if err := enableService(o, name); err != nil {
 			return err
 		}
 	}
 	return nil
 }
+
+// Serialize helper changes across the ownership check and adoption rollback.
+func lockServiceDir(dir string) (*os.File, error) {
+	f, err := os.Open(dir)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return f, nil
+}
+
+func enableService(o Options, name string) error {
+	dest := filepath.Join(o.Dir, name)
+	info, err := os.Lstat(dest)
+	switch {
+	case err == nil && !info.IsDir():
+		return fmt.Errorf("refusing non-directory service %s", dest)
+	case err == nil && Owned(dest):
+		return activate(dest)
+	case err == nil && !(o.AdoptAPI && name == "podman-api"):
+		return fmt.Errorf("refusing to adopt unmanaged service %s", dest)
+	case err != nil && !os.IsNotExist(err):
+		return err
+	}
+
+	stage, err := os.MkdirTemp(o.Dir, ".podman-runit-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(stage)
+	if err := install(stage, name, o.Assets); err != nil {
+		return err
+	}
+	if info != nil {
+		return adoptService(dest, stage)
+	}
+	if err := os.Rename(stage, dest); err != nil {
+		return err
+	}
+	return activate(dest)
+}
+
+func activate(dest string) error {
+	if err := os.Remove(filepath.Join(dest, "down")); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return control(dest, "up")
+}
+
 func install(dest, name, assets string) error {
 	if err := os.WriteFile(filepath.Join(dest, "down"), nil, 0600); err != nil {
 		return err
 	}
-	for _, p := range []string{"run", "check"} {
+	if err := os.Mkdir(filepath.Join(dest, "log"), 0700); err != nil {
+		return err
+	}
+	for _, p := range []string{"run", "check", "log/run"} {
 		if err := os.Symlink(filepath.Join(assets, name, p), filepath.Join(dest, p)); err != nil {
 			return err
 		}
 	}
-	if _, err := os.Stat(filepath.Join(dest, "log")); os.IsNotExist(err) {
-		if err := os.Mkdir(filepath.Join(dest, "log"), 0700); err != nil {
-			return err
-		}
-		if err := os.Symlink(filepath.Join(assets, name, "log/run"), filepath.Join(dest, "log/run")); err != nil {
-			return err
-		}
-	}
-	if _, err := os.Stat(filepath.Join(dest, "conf")); os.IsNotExist(err) {
-		if err := os.WriteFile(filepath.Join(dest, "conf"), []byte("# Trusted POSIX shell assignments; shared socket belongs in common.conf.\n"), 0600); err != nil {
-			return err
-		}
+	if err := os.WriteFile(filepath.Join(dest, "conf"), []byte("# Trusted POSIX shell assignments; shared socket belongs in common.conf.\n"), 0600); err != nil {
+		return err
 	}
 	return os.WriteFile(filepath.Join(dest, Marker), []byte("podman-runit-v1\n"), 0600)
 }
 func Disable(o Options) error {
+	if !o.DryRun {
+		lock, err := lockServiceDir(o.Dir)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		defer lock.Close()
+	}
 	names := Names
 	if o.SchedulerOnly {
 		names = names[1:]

@@ -40,7 +40,8 @@ podman-runit enable --adopt-api
 
 Adoption stops only that API service, backs up its `run`/`check` scripts into a
 unique `.before-adoption-*` directory, preserves its logger and local `conf`,
-and links the packaged scripts.
+and links the packaged scripts. If installation or the supervised startup
+check fails, the helper restores the original files and runsv request.
 
 ## Configuration files and precedence
 
