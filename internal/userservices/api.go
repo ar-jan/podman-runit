@@ -12,8 +12,9 @@ import (
 )
 
 // ExecAPI retains a kernel lock across exec. It never removes a live socket.
-// A refused, same-user socket in a private directory may be left by a killed
-// managed API process; only that stale inode is removed under the API lock.
+// A refused, same-user socket in a directory only the user can write may be
+// left by a killed managed API process; only that stale inode is removed under
+// the API lock.
 func ExecAPI(socket string) error {
 	if os.Geteuid() == 0 {
 		return errors.New("rootful API service is outside the supported scope")
@@ -41,7 +42,7 @@ func prepareSocket(socket string) error {
 	if err := os.MkdirAll(parent, 0700); err != nil {
 		return err
 	}
-	if err := config.PrivateDir(parent); err != nil {
+	if err := config.SocketDir(parent); err != nil {
 		return err
 	}
 	if before, err := os.Lstat(socket); err == nil {

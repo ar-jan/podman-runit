@@ -74,8 +74,9 @@ PODMAN_RUNIT_SOCKET="$XDG_RUNTIME_DIR/podman/podman.sock"
 The `podman-api` launcher holds an endpoint lock across `exec` of
 `/usr/bin/podman`. It refuses live or foreign sockets and never deletes a
 socket during `enable`/`disable`. On startup after an API crash, it removes a
-stale socket only if it is owned by the same user, lives in a private
-directory, refuses connections, and keeps an unchanged inode.
+stale socket only if it is owned by the same user, lives in a user-owned
+directory that no other user can write (`0700` or `0755`), refuses connections,
+and keeps an unchanged inode.
 
 ## Turnstile, readiness, and lingering
 

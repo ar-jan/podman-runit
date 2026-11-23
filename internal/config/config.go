@@ -15,15 +15,33 @@ func PrivateDir(path string) error {
 	if !filepath.IsAbs(path) {
 		return errors.New("runtime directory must be absolute")
 	}
+	if ok, err := ownedDir(path, 0077); err != nil || !ok {
+		return orError(err, "runtime directory must be a private, user-owned directory (0700)")
+	}
+	return nil
+}
+
+// SocketDir accepts a user-owned directory that only its owner can write, so no
+// other user can replace a socket in it. Others may still traverse it (0755).
+func SocketDir(path string) error {
+	if ok, err := ownedDir(path, 0022); err != nil || !ok {
+		return orError(err, "socket directory must be user owned and writable only by that user")
+	}
+	return nil
+}
+func ownedDir(path string, forbidden os.FileMode) (bool, error) {
 	s, err := os.Lstat(path)
+	if err != nil {
+		return false, err
+	}
+	st, ok := s.Sys().(*syscall.Stat_t)
+	return ok && s.IsDir() && st.Uid == uint32(os.Getuid()) && s.Mode().Perm()&forbidden == 0, nil
+}
+func orError(err error, message string) error {
 	if err != nil {
 		return err
 	}
-	st, ok := s.Sys().(*syscall.Stat_t)
-	if !ok || !s.IsDir() || st.Uid != uint32(os.Getuid()) || s.Mode().Perm()&0077 != 0 {
-		return errors.New("runtime directory must be a private, user-owned directory (0700)")
-	}
-	return nil
+	return errors.New(message)
 }
 func Socket(explicit string) (string, error) {
 	if explicit == "" {
