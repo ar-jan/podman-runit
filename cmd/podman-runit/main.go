@@ -45,10 +45,6 @@ func run() error {
 	if f.NArg() != 0 {
 		return errors.New("unexpected positional arguments")
 	}
-	socket, err := config.Socket(*socketFlag)
-	if err != nil {
-		return err
-	}
 	dir, err := userservices.Directory(*dirFlag)
 	if err != nil {
 		return err
@@ -57,7 +53,17 @@ func run() error {
 	if configHome == "" {
 		configHome = filepath.Join(os.Getenv("HOME"), ".config")
 	}
-	o := userservices.Options{ConfigFile: filepath.Join(configHome, "podman-runit/common.conf"), Dir: dir, Assets: *assets, Socket: socket, SchedulerOnly: *only, AdoptAPI: *adopt, DryRun: *dry, Out: os.Stdout}
+	o := userservices.Options{ConfigFile: filepath.Join(configHome, "podman-runit/common.conf"), Dir: dir, Assets: *assets, SchedulerOnly: *only, AdoptAPI: *adopt, DryRun: *dry, Out: os.Stdout}
+	// disable never uses the socket, so it works without a runtime directory
+	// (for example from su or sudo during uninstall).
+	if command == "disable" {
+		return userservices.Disable(o)
+	}
+	socket, err := config.Socket(*socketFlag)
+	if err != nil {
+		return err
+	}
+	o.Socket = socket
 	switch command {
 	case "api-exec":
 		return userservices.ExecAPI(socket)
@@ -70,8 +76,6 @@ func run() error {
 			return errors.New("enable --socket differs from shared configuration; set PODMAN_RUNIT_SOCKET in common.conf before enabling services")
 		}
 		return userservices.Enable(o)
-	case "disable":
-		return userservices.Disable(o)
 	case "status", "check-scheduler":
 		runtime, err := config.RuntimePath(socket)
 		if err != nil {
