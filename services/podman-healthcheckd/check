@@ -1,2 +1,3 @@
 #!/bin/sh
-exec /usr/share/podman-runit/services/launch check-scheduler
+script=$(readlink -f "$0") || exit 1
+exec "${script%/*}/../launch" check-scheduler

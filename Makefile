@@ -6,7 +6,7 @@ GO ?= go
 all:
 	mkdir -p build
 	CGO_ENABLED=0 $(GO) build -trimpath -o build/podman-healthcheckd ./cmd/podman-healthcheckd
-	CGO_ENABLED=0 $(GO) build -trimpath -o build/podman-runit ./cmd/podman-runit
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags "-X 'main.defaultAssets=$(PREFIX)/share/podman-runit/services'" -o build/podman-runit ./cmd/podman-runit
 
 test:
 	$(GO) test ./...
@@ -17,17 +17,17 @@ check: test
 	shellcheck services/launch services/*/run services/*/check services/*/log/run
 
 install: all install-assets
-	install -Dm755 build/podman-healthcheckd $(DESTDIR)$(PREFIX)/bin/podman-healthcheckd
-	install -Dm755 build/podman-runit $(DESTDIR)$(PREFIX)/bin/podman-runit
+	install -Dm755 build/podman-healthcheckd "$(DESTDIR)$(PREFIX)/bin/podman-healthcheckd"
+	install -Dm755 build/podman-runit "$(DESTDIR)$(PREFIX)/bin/podman-runit"
 
 install-assets:
-	install -d $(DESTDIR)$(PREFIX)/share/podman-runit/services
-	cp -R services/. $(DESTDIR)$(PREFIX)/share/podman-runit/services/
-	install -Dm644 LICENSE $(DESTDIR)$(PREFIX)/share/licenses/podman-runit/LICENSE
-	install -Dm644 README.md $(DESTDIR)$(PREFIX)/share/doc/podman-runit/README.md
-	install -d $(DESTDIR)$(PREFIX)/share/doc/podman-runit/docs
-	cp -R docs/. $(DESTDIR)$(PREFIX)/share/doc/podman-runit/docs/
-	install -Dm644 tests/integration/REPORT.md $(DESTDIR)$(PREFIX)/share/doc/podman-runit/tests/integration/REPORT.md
+	install -d "$(DESTDIR)$(PREFIX)/share/podman-runit/services"
+	cp -R services/. "$(DESTDIR)$(PREFIX)/share/podman-runit/services/"
+	install -Dm644 LICENSE "$(DESTDIR)$(PREFIX)/share/licenses/podman-runit/LICENSE"
+	install -Dm644 README.md "$(DESTDIR)$(PREFIX)/share/doc/podman-runit/README.md"
+	install -d "$(DESTDIR)$(PREFIX)/share/doc/podman-runit/docs"
+	cp -R docs/. "$(DESTDIR)$(PREFIX)/share/doc/podman-runit/docs/"
+	install -Dm644 tests/integration/REPORT.md "$(DESTDIR)$(PREFIX)/share/doc/podman-runit/tests/integration/REPORT.md"
 
 archive:
 	./packaging/void/local-source.sh

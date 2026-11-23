@@ -9,6 +9,33 @@ import (
 	"testing"
 )
 
+// Use the installed directory layout so the real launcher resolves its binaries.
+func testLauncher(t *testing.T, prefix, fake string) string {
+	t.Helper()
+	dir := filepath.Join(prefix, "share/podman-runit/services")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(prefix, "bin")
+	if err := os.Mkdir(bin, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"podman-runit", "podman-healthcheckd"} {
+		if err := os.Symlink(fake, filepath.Join(bin, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	script, err := os.ReadFile("../../services/launch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	launch := filepath.Join(dir, "launch")
+	if err := os.WriteFile(launch, script, 0700); err != nil {
+		t.Fatal(err)
+	}
+	return launch
+}
+
 func TestLauncherEnvironmentPrecedence(t *testing.T) {
 	if _, err := exec.LookPath("chpst"); err != nil {
 		t.Skip("runit needed for envdir launcher test")
@@ -28,12 +55,7 @@ func TestLauncherEnvironmentPrecedence(t *testing.T) {
 	os.WriteFile(filepath.Join(service, "conf"), []byte("LOCAL_TEST=service\nPODMAN_RUNIT_WORKERS=2\n"), 0600)
 	fake := filepath.Join(dir, "daemon")
 	os.WriteFile(fake, []byte("#!/bin/sh\nprintf '%s\\n' \"$PODMAN_RUNIT_SOCKET\" \"$LOCAL_TEST\" \"$@\"\n"), 0700)
-	script, err := os.ReadFile("../../services/launch")
-	if err != nil {
-		t.Fatal(err)
-	}
-	launch := filepath.Join(dir, "launch")
-	os.WriteFile(launch, []byte(strings.ReplaceAll(string(script), "/usr/bin/podman-healthcheckd", fake)), 0700)
+	launch := testLauncher(t, dir, fake)
 	cmd := exec.Command(launch, "podman-healthcheckd", "--workers", "3")
 	cmd.Dir = service
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + home, "XDG_RUNTIME_DIR=/wrong", "TURNSTILE_ENV_DIR=" + envdir}
@@ -65,12 +87,7 @@ func TestLauncherSocketForms(t *testing.T) {
 	os.Mkdir(service, 0700)
 	fake := filepath.Join(dir, "daemon")
 	os.WriteFile(fake, []byte("#!/bin/sh\nprintf '%s\\n' \"$PODMAN_RUNIT_SOCKET\"\n"), 0700)
-	script, err := os.ReadFile("../../services/launch")
-	if err != nil {
-		t.Fatal(err)
-	}
-	launch := filepath.Join(dir, "launch")
-	os.WriteFile(launch, []byte(strings.ReplaceAll(string(script), "/usr/bin/podman-healthcheckd", fake)), 0700)
+	launch := testLauncher(t, dir, fake)
 	for _, tc := range []struct{ socket, want string }{
 		{runtime + "/podman.sock", runtime + "/podman.sock"},
 		{"unix://" + runtime + "/podman.sock", runtime + "/podman.sock"},
@@ -107,13 +124,7 @@ func TestLauncherStreams(t *testing.T) {
 	os.Mkdir(service, 0700)
 	fake := filepath.Join(dir, "fake")
 	os.WriteFile(fake, []byte("#!/bin/sh\necho \"fake $*\" >&2\n"), 0700)
-	script, err := os.ReadFile("../../services/launch")
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := strings.ReplaceAll(string(script), "/usr/bin/podman-runit", fake)
-	launch := filepath.Join(dir, "launch")
-	os.WriteFile(launch, []byte(strings.ReplaceAll(s, "/usr/bin/podman-healthcheckd", fake)), 0700)
+	launch := testLauncher(t, dir, fake)
 	run := func(closeStdout bool, xdg string, args ...string) (string, string, error) {
 		// runit's sv runs ./check with stdout closed.
 		wrapper := `exec "$0" "$@"`

@@ -18,6 +18,9 @@ import (
 	"time"
 )
 
+// Set by make when installing outside the distribution prefix.
+var defaultAssets = "/usr/share/podman-runit/services"
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -34,7 +37,7 @@ func run() error {
 	command := os.Args[1]
 	f := flag.NewFlagSet(command, flag.ContinueOnError)
 	dirFlag := f.String("service-dir", "", "one user runit service directory")
-	assets := f.String("assets", "/usr/share/podman-runit/services", "packaged service assets")
+	assets := f.String("assets", defaultAssets, "packaged service assets")
 	socketFlag := f.String("socket", "", "absolute Unix socket")
 	only := f.Bool("scheduler-only", false, "reuse independently managed API")
 	adopt := f.Bool("adopt-api", false, "explicitly adopt manual API, backing up run/check and retaining logger")

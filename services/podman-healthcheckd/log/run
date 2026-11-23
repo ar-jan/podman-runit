@@ -1,2 +1,3 @@
 #!/bin/sh
-exec /usr/share/podman-runit/services/launch log-podman-healthcheckd
+script=$(readlink -f "$0") || exit 1
+exec "${script%/*}/../../launch" log-podman-healthcheckd

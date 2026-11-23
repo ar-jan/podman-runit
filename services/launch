@@ -37,15 +37,21 @@ PODMAN_RUNIT_SOCKET=${PODMAN_RUNIT_SOCKET#unix://}
 case "$PODMAN_RUNIT_SOCKET" in '' | [!/]* | *://*) echo 'socket must be an absolute Unix path' >&2; exit 1;; esac
 export PODMAN_RUNIT_SOCKET
 export PODMAN_RUNIT_CONFIG_LOADED=1
+script=$(readlink -f "$0")
+# A standalone source asset tree uses the distribution binaries.
+case "$script" in
+    */share/podman-runit/services/launch) bindir=${script%/share/podman-runit/services/launch}/bin ;;
+    *) bindir=/usr/bin ;;
+esac
 mode=$1
 shift
 case "$mode" in
     podman-api)
-        exec /usr/bin/podman-runit api-exec ;;
-    podman-healthcheckd) exec /usr/bin/podman-healthcheckd --workers "${PODMAN_RUNIT_WORKERS:-4}" --reconcile "${PODMAN_RUNIT_RECONCILE:-60s}" --drain "${PODMAN_RUNIT_DRAIN:-8s}" "$@" ;;
-    check-api) exec /usr/bin/podman-runit check-api "$@" ;;
-    check-scheduler) exec /usr/bin/podman-runit check-scheduler "$@" ;;
-    helper) exec /usr/bin/podman-runit "$@" ;;
+        exec "$bindir/podman-runit" api-exec ;;
+    podman-healthcheckd) exec "$bindir/podman-healthcheckd" --workers "${PODMAN_RUNIT_WORKERS:-4}" --reconcile "${PODMAN_RUNIT_RECONCILE:-60s}" --drain "${PODMAN_RUNIT_DRAIN:-8s}" "$@" ;;
+    check-api) exec "$bindir/podman-runit" check-api "$@" ;;
+    check-scheduler) exec "$bindir/podman-runit" check-scheduler "$@" ;;
+    helper) exec "$bindir/podman-runit" "$@" ;;
     log-*)
         name=${mode#log-}
         logdir="${XDG_STATE_HOME:-$HOME/.local/state}/svlog/$name"
