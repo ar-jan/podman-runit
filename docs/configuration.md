@@ -62,6 +62,7 @@ PODMAN_RUNIT_SOCKET="$XDG_RUNTIME_DIR/podman/podman.sock"
 ```
 
 - Set `PODMAN_RUNIT_SOCKET` in `common.conf` before enabling either service.
+  It must be an absolute path, optionally written as `unix:///path/to.sock`.
   Service-local `conf` files cannot override the shared socket.
 - `XDG_RUNTIME_DIR` must be a user-owned private directory (`0700`); there is
   no `/tmp` or rootful fallback.

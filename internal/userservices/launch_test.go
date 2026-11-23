@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"podman-runit/internal/config"
 	"strings"
 	"testing"
 )
@@ -50,5 +51,51 @@ func TestLauncherEnvironmentPrecedence(t *testing.T) {
 	cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + home, "XDG_RUNTIME_DIR=" + runtime}
 	if err := cmd.Run(); err == nil {
 		t.Fatal("service socket override accepted")
+	}
+}
+func TestLauncherSocketForms(t *testing.T) {
+	// The launcher must accept exactly the socket forms config.Socket accepts.
+	dir := t.TempDir()
+	runtime := filepath.Join(dir, "runtime")
+	os.Mkdir(runtime, 0700)
+	home := filepath.Join(dir, "home")
+	shared := filepath.Join(home, ".config/podman-runit")
+	os.MkdirAll(shared, 0700)
+	service := filepath.Join(dir, "service")
+	os.Mkdir(service, 0700)
+	fake := filepath.Join(dir, "daemon")
+	os.WriteFile(fake, []byte("#!/bin/sh\nprintf '%s\\n' \"$PODMAN_RUNIT_SOCKET\"\n"), 0700)
+	script, err := os.ReadFile("../../services/launch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	launch := filepath.Join(dir, "launch")
+	os.WriteFile(launch, []byte(strings.ReplaceAll(string(script), "/usr/bin/podman-healthcheckd", fake)), 0700)
+	for _, tc := range []struct{ socket, want string }{
+		{runtime + "/podman.sock", runtime + "/podman.sock"},
+		{"unix://" + runtime + "/podman.sock", runtime + "/podman.sock"},
+		{"unix://relative.sock", ""},
+		{"relative.sock", ""},
+		{"tcp://localhost:1", ""},
+		{"/odd://path.sock", ""},
+	} {
+		os.WriteFile(filepath.Join(shared, "common.conf"), []byte("PODMAN_RUNIT_SOCKET='"+tc.socket+"'\n"), 0600)
+		cmd := exec.Command(launch, "podman-healthcheckd")
+		cmd.Dir = service
+		cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + home, "XDG_RUNTIME_DIR=" + runtime}
+		b, err := cmd.CombinedOutput()
+		if tc.want == "" {
+			if err == nil {
+				t.Fatalf("%q accepted: %s", tc.socket, b)
+			}
+			continue
+		}
+		if err != nil || string(b) != tc.want+"\n" {
+			t.Fatalf("%q: got %q (%v), want %q", tc.socket, b, err, tc.want)
+		}
+		helper, err := config.Socket(tc.socket)
+		if err != nil || helper != tc.want {
+			t.Fatalf("%q: helper resolved %q (%v)", tc.socket, helper, err)
+		}
 	}
 }

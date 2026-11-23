@@ -29,7 +29,9 @@ case "$1" in
     *) trusted_source "$PWD/conf" ;;
 esac
 [ "$PODMAN_RUNIT_SOCKET" = "$shared_socket" ] || { echo 'set the shared socket only in common.conf'; exit 1; }
-case "$PODMAN_RUNIT_SOCKET" in /*) ;; *) echo 'socket must be an absolute Unix path'; exit 1;; esac
+# Same rules as the helper: an optional unix:// prefix before an absolute path.
+PODMAN_RUNIT_SOCKET=${PODMAN_RUNIT_SOCKET#unix://}
+case "$PODMAN_RUNIT_SOCKET" in '' | [!/]* | *://*) echo 'socket must be an absolute Unix path'; exit 1;; esac
 export PODMAN_RUNIT_SOCKET
 export PODMAN_RUNIT_CONFIG_LOADED=1
 mode=$1
