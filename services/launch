@@ -1,7 +1,10 @@
 #!/bin/sh
 # Called via package-owned symlinks from writable, user-owned service directories.
 set -eu
-exec 2>&1
+# runit's sv runs ./check with stdout closed, so merge stderr into stdout (the
+# log pipe for run scripts) only when stdout is open. The probe duplicates fd 1
+# without opening a file, which would itself take the closed fd 1.
+if { true 3>&1; } 2>&-; then exec 2>&1; fi
 if [ "${PODMAN_RUNIT_ENV_LOADED:-}" != 1 ] && [ -n "${TURNSTILE_ENV_DIR:-}" ]; then
     export PODMAN_RUNIT_ENV_LOADED=1
     exec chpst -e "$TURNSTILE_ENV_DIR" "$0" "$@"
@@ -9,10 +12,10 @@ fi
 umask 077
 trusted_source() {
     [ -e "$1" ] || return 0
-    [ -f "$1" ] && [ "$(stat -Lc %u "$1")" = "$(id -u)" ] || { echo "untrusted config: $1"; exit 1; }
+    [ -f "$1" ] && [ "$(stat -Lc %u "$1")" = "$(id -u)" ] || { echo "untrusted config: $1" >&2; exit 1; }
     # Reject group/other writes; sourced configuration is intentionally executable.
     mode=$(stat -Lc %a "$1")
-    [ $((0$mode & 0022)) -eq 0 ] || { echo "writable config: $1"; exit 1; }
+    [ $((0$mode & 0022)) -eq 0 ] || { echo "writable config: $1" >&2; exit 1; }
     set -a
     # shellcheck disable=SC1090
     . "$1"
@@ -20,7 +23,7 @@ trusted_source() {
 }
 trusted_source "${XDG_CONFIG_HOME:-$HOME/.config}/podman-runit/common.conf"
 : "${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is required}"
-[ -d "$XDG_RUNTIME_DIR" ] && [ ! -L "$XDG_RUNTIME_DIR" ] && [ "$(stat -c %u "$XDG_RUNTIME_DIR")" = "$(id -u)" ] && [ "$(stat -c %a "$XDG_RUNTIME_DIR")" = 700 ] || { echo 'runtime directory must be private and user owned'; exit 1; }
+[ -d "$XDG_RUNTIME_DIR" ] && [ ! -L "$XDG_RUNTIME_DIR" ] && [ "$(stat -c %u "$XDG_RUNTIME_DIR")" = "$(id -u)" ] && [ "$(stat -c %a "$XDG_RUNTIME_DIR")" = 700 ] || { echo 'runtime directory must be private and user owned' >&2; exit 1; }
 PODMAN_RUNIT_SOCKET=${PODMAN_RUNIT_SOCKET:-$XDG_RUNTIME_DIR/podman/podman.sock}
 shared_socket=$PODMAN_RUNIT_SOCKET
 case "$1" in
@@ -28,10 +31,10 @@ case "$1" in
     log-*) trusted_source "$PWD/../conf" ;;
     *) trusted_source "$PWD/conf" ;;
 esac
-[ "$PODMAN_RUNIT_SOCKET" = "$shared_socket" ] || { echo 'set the shared socket only in common.conf'; exit 1; }
+[ "$PODMAN_RUNIT_SOCKET" = "$shared_socket" ] || { echo 'set the shared socket only in common.conf' >&2; exit 1; }
 # Same rules as the helper: an optional unix:// prefix before an absolute path.
 PODMAN_RUNIT_SOCKET=${PODMAN_RUNIT_SOCKET#unix://}
-case "$PODMAN_RUNIT_SOCKET" in '' | [!/]* | *://*) echo 'socket must be an absolute Unix path'; exit 1;; esac
+case "$PODMAN_RUNIT_SOCKET" in '' | [!/]* | *://*) echo 'socket must be an absolute Unix path' >&2; exit 1;; esac
 export PODMAN_RUNIT_SOCKET
 export PODMAN_RUNIT_CONFIG_LOADED=1
 mode=$1
@@ -49,5 +52,5 @@ case "$mode" in
         mkdir -p "$logdir"
         if [ ! -e "$logdir/config" ]; then printf 's1048576\nn5\n' > "$logdir/config"; fi
         exec svlogd -tt "$logdir" ;;
-    *) echo 'invalid service'; exit 1 ;;
+    *) echo 'invalid service' >&2; exit 1 ;;
 esac

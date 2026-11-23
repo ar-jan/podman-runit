@@ -99,3 +99,47 @@ func TestLauncherSocketForms(t *testing.T) {
 		}
 	}
 }
+func TestLauncherStreams(t *testing.T) {
+	dir := t.TempDir()
+	runtime := filepath.Join(dir, "runtime")
+	os.Mkdir(runtime, 0700)
+	service := filepath.Join(dir, "service")
+	os.Mkdir(service, 0700)
+	fake := filepath.Join(dir, "fake")
+	os.WriteFile(fake, []byte("#!/bin/sh\necho \"fake $*\" >&2\n"), 0700)
+	script, err := os.ReadFile("../../services/launch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := strings.ReplaceAll(string(script), "/usr/bin/podman-runit", fake)
+	launch := filepath.Join(dir, "launch")
+	os.WriteFile(launch, []byte(strings.ReplaceAll(s, "/usr/bin/podman-healthcheckd", fake)), 0700)
+	run := func(closeStdout bool, xdg string, args ...string) (string, string, error) {
+		// runit's sv runs ./check with stdout closed.
+		wrapper := `exec "$0" "$@"`
+		if closeStdout {
+			wrapper = `exec 1>&-; exec "$0" "$@"`
+		}
+		cmd := exec.Command("sh", append([]string{"-c", wrapper, launch}, args...)...)
+		cmd.Dir = service
+		cmd.Env = []string{"PATH=/usr/bin:/bin", "HOME=" + dir, "XDG_RUNTIME_DIR=" + xdg}
+		var stdout, stderr strings.Builder
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		err := cmd.Run()
+		return stdout.String(), stderr.String(), err
+	}
+	for _, mode := range []string{"check-api", "check-scheduler"} {
+		if _, stderr, err := run(true, runtime, mode); err != nil || stderr != "fake "+mode+"\n" {
+			t.Fatalf("%s with stdout closed: %v, stderr %q", mode, err, stderr)
+		}
+	}
+	os.Chmod(runtime, 0755)
+	if _, stderr, err := run(true, runtime, "check-api"); err == nil || !strings.Contains(stderr, "runtime directory must be private") {
+		t.Fatalf("failing check did not explain itself: %v, stderr %q", err, stderr)
+	}
+	os.Chmod(runtime, 0700)
+	// Run scripts keep stderr merged into stdout, the log pipe.
+	if stdout, stderr, err := run(false, runtime, "podman-healthcheckd"); err != nil || !strings.HasPrefix(stdout, "fake --workers") || stderr != "" {
+		t.Fatalf("run mode: %v, stdout %q, stderr %q", err, stdout, stderr)
+	}
+}
