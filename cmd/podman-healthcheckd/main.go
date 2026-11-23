@@ -23,15 +23,29 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	dir, err := config.Runtime(socket)
+	legacy, err := config.Runtime(socket)
 	if err != nil {
 		log.Fatal(err)
 	}
-	lock, err := config.Lock(dir)
+	legacyLock, err := config.Lock(legacy)
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer lock.Close()
+	defer legacyLock.Close()
+	dir, err := config.SchedulerPath(socket)
+	if err != nil {
+		log.Fatal(err)
+	}
+	lock, err := config.LockSchedulerDir(dir, legacyLock)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if lock != legacyLock {
+		defer lock.Close()
+		if err := scheduler.ImportJournal(legacy, dir); err != nil {
+			log.Fatal(err)
+		}
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	c := podmanapi.New(socket)

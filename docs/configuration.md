@@ -115,7 +115,10 @@ per configuration change.
 - **Upgrading:** Package-owned symlinks pick up updated scripts on the next
   service restart. Restart `podman-api` and `podman-healthcheckd` after
   upgrading binaries (keep both stopped during replacement if the launch
-  protocol changes). The recovery journal prevents immediate duplicate probes
+  protocol changes). When upgrading a scheduler with a custom runtime directory,
+  stop the old scheduler and start the new version once with that same
+  `XDG_RUNTIME_DIR` so it can import any outstanding recovery holds. The
+  recovery journal prevents immediate duplicate probes
   across a scheduler restart.
 - **Uninstalling:** Run `podman-runit disable` as each user who enabled the
   services, then remove the package with `xbps-remove`. User service

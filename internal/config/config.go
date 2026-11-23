@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -66,23 +67,76 @@ func RuntimePath(socket string) (string, error) {
 	if err := PrivateDir(root); err != nil {
 		return "", err
 	}
-	sum := sha256.Sum256([]byte(socket))
-	dir := filepath.Join(root, "podman-runit", hex.EncodeToString(sum[:12]))
-	return dir, nil
+	return endpointDir(root, socket), nil
 }
+
+func endpointDir(root, socket string) string {
+	sum := sha256.Sum256([]byte(filepath.Clean(socket)))
+	return filepath.Join(root, "podman-runit", hex.EncodeToString(sum[:12]))
+}
+
+// SchedulerPath depends only on the UID and socket. Keep the established
+// location for endpoints under the standard per-user runtime directory.
+func SchedulerPath(socket string) (string, error) {
+	uid := strconv.Itoa(os.Getuid())
+	root := filepath.Join("/run/user", uid)
+	if !strings.HasPrefix(filepath.Clean(socket), root+"/") {
+		account, err := user.LookupId(uid)
+		if err != nil {
+			return "", err
+		}
+		if !filepath.IsAbs(account.HomeDir) {
+			return "", errors.New("account home directory must be absolute")
+		}
+		root = filepath.Join(account.HomeDir, ".local/state")
+	}
+	return endpointDir(root, socket), nil
+}
+
+func privateEndpointDir(dir string) error {
+	parent := filepath.Dir(dir)
+	if err := os.MkdirAll(parent, 0700); err != nil {
+		return err
+	}
+	if err := PrivateDir(parent); err != nil {
+		return err
+	}
+	if err := os.Mkdir(dir, 0700); err != nil && !os.IsExist(err) {
+		return err
+	}
+	return PrivateDir(dir)
+}
+
 func Runtime(socket string) (string, error) {
 	dir, err := RuntimePath(socket)
 	if err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return "", err
-	}
-	if err := PrivateDir(filepath.Dir(dir)); err != nil {
-		return "", err
-	}
-	return dir, PrivateDir(dir)
+	return dir, privateEndpointDir(dir)
 }
+
+// LockSchedulerDir reuses a legacy lock if the two paths name the same inode
+// (for example, /var/run and /run). A second flock would conflict with ours.
+func LockSchedulerDir(dir string, legacy *os.File) (*os.File, error) {
+	if err := privateEndpointDir(dir); err != nil {
+		return nil, err
+	}
+	if legacy != nil {
+		held, err := legacy.Stat()
+		if err != nil {
+			return nil, err
+		}
+		target, err := os.Lstat(filepath.Join(dir, SchedulerLock))
+		if err == nil && os.SameFile(held, target) {
+			return legacy, nil
+		}
+		if err != nil && !os.IsNotExist(err) {
+			return nil, err
+		}
+	}
+	return Lock(dir)
+}
+
 func Lock(dir string) (*os.File, error) {
 	fd, err := syscall.Open(filepath.Join(dir, SchedulerLock), syscall.O_CREAT|syscall.O_RDWR|syscall.O_CLOEXEC|syscall.O_NOFOLLOW, 0600)
 	if err != nil {

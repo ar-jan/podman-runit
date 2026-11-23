@@ -76,7 +76,7 @@ func run() error {
 		}
 		return userservices.Enable(o)
 	case "status", "check-scheduler":
-		runtime, err := config.RuntimePath(socket)
+		runtime, err := config.SchedulerPath(socket)
 		if err != nil {
 			return err
 		}
@@ -135,7 +135,7 @@ func run() error {
 					fmt.Print(string(b))
 				}
 			}
-			runtime, err := config.RuntimePath(socket)
+			runtime, err := config.SchedulerPath(socket)
 			if err == nil {
 				// List holders instead of trying the lock: even a brief probe
 				// would make a scheduler starting at that moment exit.
@@ -154,6 +154,9 @@ func run() error {
 				if s, e := scheduler.ReadStatus(runtime); e == nil {
 					fmt.Printf("scheduler: %s updated=%s pid=%d\n", s.State, s.Updated.Format(time.RFC3339), s.PID)
 				}
+			}
+			runtime, err = config.RuntimePath(socket)
+			if err == nil {
 				// The managed API holds this lock; a holder outside the service's
 				// process tree outlived its supervisor and blocks restarts.
 				api := filepath.Join(dir, userservices.Names[0])

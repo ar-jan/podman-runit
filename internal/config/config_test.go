@@ -146,3 +146,35 @@ func TestImportCommonRemovesVariables(t *testing.T) {
 		}
 	}
 }
+
+func TestSchedulerLockAcrossRuntimeDirectories(t *testing.T) {
+	socket := filepath.Join(t.TempDir(), "podman.sock")
+	dir, err := SchedulerPath(socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	lock, err := LockSchedulerDir(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(filepath.Dir(filepath.Dir(dir)), alias); err != nil {
+		t.Fatal(err)
+	}
+	reused, err := LockSchedulerDir(filepath.Join(alias, "podman-runit", filepath.Base(dir)), lock)
+	if err != nil || reused != lock {
+		t.Fatalf("alias conflicted with our own lock: %v", err)
+	}
+	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	other, err := SchedulerPath(socket)
+	if err != nil || other != dir {
+		t.Fatalf("same endpoint resolved to %q and %q: %v", dir, other, err)
+	}
+	if second, err := LockSchedulerDir(other, nil); err == nil {
+		second.Close()
+		t.Fatal("second scheduler acquired the endpoint lock")
+	}
+}

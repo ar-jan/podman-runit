@@ -163,11 +163,12 @@ func TestDoctorNeverTakesSchedulerLock(t *testing.T) {
 	xdg := t.TempDir()
 	os.Chmod(xdg, 0700)
 	t.Setenv("XDG_RUNTIME_DIR", xdg)
-	runtime, err := config.Runtime(socket)
+	runtime, err := config.SchedulerPath(socket)
 	if err != nil {
 		t.Fatal(err)
 	}
-	lock, err := config.Lock(runtime)
+	t.Cleanup(func() { os.RemoveAll(runtime) })
+	lock, err := config.LockSchedulerDir(runtime, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

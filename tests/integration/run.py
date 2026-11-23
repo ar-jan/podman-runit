@@ -2,7 +2,7 @@
 """Isolated, opt-in stock Podman contract and scheduler smoke suite.
 Never reads or modifies the user's container store or API service.
 """
-import argparse, json, os, pathlib, shutil, shlex, subprocess, tempfile, time
+import argparse, hashlib, json, os, pathlib, pwd, shutil, shlex, subprocess, tempfile, time
 
 p = argparse.ArgumentParser()
 p.add_argument('--podman', required=True, type=pathlib.Path)
@@ -19,6 +19,10 @@ env.update(XDG_RUNTIME_DIR=str(runtime), CONTAINERS_CONF=str(conf), CONTAINERS_C
 (work/'storage.conf').write_text(f'[storage]\ndriver="vfs"\nrunroot="{work}/runroot"\ngraphroot="{work}/storage"\n')
 base = [str(a.podman.resolve()), '--root', str(work/'storage'), '--runroot', str(work/'runroot'), '--storage-driver', 'vfs', '--cgroup-manager', 'cgroupfs', '--events-backend', 'file', '--network-config-dir', str(work/'networks')]
 socket = runtime/'api.sock'
+# This randomly named socket has its own scheduler state, shared across launches.
+uid_runtime = pathlib.Path('/run/user')/str(os.getuid())
+state_root = uid_runtime if socket.is_relative_to(uid_runtime) else pathlib.Path(pwd.getpwuid(os.getuid()).pw_dir)/'.local/state'
+scheduler_dir = state_root/'podman-runit'/hashlib.sha256(os.fsencode(socket)).hexdigest()[:24]
 processes=[]; ids=[]; evidence={}; logs=[]
 class Managed:
     def __init__(self, command, log):
@@ -163,8 +167,7 @@ try:
     evidence['checks']=['CMD and CMD-SHELL health commands','first success during start_period','retries/unhealthy','timeout','disabled interval','startup excluded','failure action stop','interval update','scheduler restart','API restart','actual Docker Compose service_healthy']
     evidence['scheduler_proc_status']=(pathlib.Path('/proc')/str(scheduler.pid)/'status').read_text()
     evidence['api_proc_status']=(pathlib.Path('/proc')/str(api_proc.pid)/'status').read_text()
-    status_files=list(runtime.glob('podman-runit/*/status.json'))
-    evidence['scheduler_status']=json.loads(status_files[0].read_text())
+    evidence['scheduler_status']=json.loads((scheduler_dir/'status.json').read_text())
     evidence['result']='passed'
 finally:
     for proc in reversed(processes):
@@ -174,6 +177,9 @@ finally:
     # Explicitly isolated storage arguments, even if Compose set remote env.
     env.pop('CONTAINER_HOST',None);env.pop('DOCKER_HOST',None)
     cli('rm','-af',check=False)
+    if scheduler_dir.exists():
+        shutil.copytree(scheduler_dir, work/'scheduler-state')
+        shutil.rmtree(scheduler_dir)
     for log in logs:log.close()
     (work/'evidence.json').write_text(json.dumps(evidence,indent=2))
     print('Evidence:',work)

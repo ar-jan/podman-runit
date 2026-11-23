@@ -79,7 +79,11 @@ old configuration.
 ## Single-owner locking
 
 An endpoint-specific kernel lock (`flock`) enforces a single cooperating
-scheduler per socket. Locks are keyed by the cleaned socket path, **not engine
+scheduler per socket. All launch environments for a UID share its lock,
+status, and recovery journal. For sockets under `/run/user/<uid>`, these
+files stay in that runtime directory's `podman-runit/<socket-hash>` tree.
+For other sockets they live in `.local/state/podman-runit/<socket-hash>`
+under the home directory from the user account database. Locks are keyed by the cleaned socket path, **not engine
 identity**: symlinked/aliased socket paths or unrelated schedulers can evade
 exclusion. Run only one scheduler per engine. `podman-runit doctor` reports
 lock and service state but cannot prove no other scheduler implementation is
